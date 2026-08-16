@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#000000</color>
+    <color name="ic_launcher_bg">#3B3B58</color>
+    <color name="status_bar">#141414</color>
+    <color name="window_background">#f9fafb</color>
+    <string name="app_name">Roleplay Hub</string>
+    <string name="export_failed">导出失败</string>
+    <string name="export_success">数据已导出</string>
+    <string name="menu_export">导出数据备份</string>
+    <style name="Theme.RoleplayHub" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@color/status_bar</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowBackground">@color/window_background</item>
+    </style>
+</resources>
