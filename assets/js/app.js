@@ -1461,8 +1461,39 @@ const app = createApp({
             });
         };
 
+        // --- Back navigation（逐级返回）---
+        // 用显式视图栈记录导航，App 返回键经 window.RPHubBack() 触发回退；
+        // 不依赖 history/goBack，避免 iframe（在线分区）内部导航污染返回栈。
+        let applyingHistoryView = false;
+        const viewStack = [currentView.value];
+
+        window.RPHubBack = function () {
+            if (viewStack.length > 1) {
+                viewStack.pop();
+                const prev = viewStack[viewStack.length - 1];
+                applyingHistoryView = true;
+                currentView.value = prev;
+                applyingHistoryView = false;
+                return true;
+            }
+            // 兜底：视图栈异常到底、但当前不在根视图（聊天页）时，强制回聊天页，
+            // 避免"按一下返回就直接退回桌面"。
+            if (currentView.value !== 'chat') {
+                applyingHistoryView = true;
+                currentView.value = 'chat';
+                applyingHistoryView = false;
+                return true;
+            }
+            return false;
+        };
+
         // Watch view change to refresh embedded pages and sortable lists
         watch(currentView, (newView) => {
+            if (!applyingHistoryView) {
+                if (viewStack[viewStack.length - 1] !== newView) {
+                    viewStack.push(newView);
+                }
+            }
             settingsHelpTopic.value = '';
             if (newView === 'characters') {
                 hasOpenedCharacterManager.value = true;
@@ -2122,6 +2153,28 @@ const app = createApp({
                 return;
             }
             finishLoading();
+        };
+
+        const handleGeneratedImageSave = (event, messageIndex) => {
+            const button = event.target.closest('.generated-image-save');
+            if (!button) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const card = button.closest('.generated-image-card');
+            if (!card || card.classList.contains('is-generating')) return;
+            const imageUrl = card.querySelector('img')?.getAttribute('src');
+            if (!imageUrl) return;
+            const native = window.RoleplayHubNative;
+            if (!native || typeof native.saveImage !== 'function') {
+                showToast('当前环境不支持保存图片', 'warning');
+                return;
+            }
+            try {
+                native.saveImage(imageUrl);
+                showToast('正在保存图片到相册...', 'info');
+            } catch (error) {
+                showToast('保存失败：' + (error.message || '未知错误'), 'error');
+            }
         };
 
         const updateImageGenRegexState = ({ enableRegex = false } = {}) => {
@@ -3665,6 +3718,20 @@ const app = createApp({
         };
 
         const toggleChatFullscreen = async () => {
+            const native = window.RoleplayHubNative;
+            if (native && typeof native.setFullscreen === 'function') {
+                const next = !isChatFullscreen.value;
+                isChatFullscreen.value = next;
+                if (next) closeMobileMenu();
+                native.setFullscreen(next);
+                setTimeout(() => {
+                    if (typeof syncMobileVisualViewport === 'function') {
+                        syncMobileVisualViewport({ force: true });
+                    }
+                    window.dispatchEvent(new Event('resize'));
+                }, 300);
+                return;
+            }
             try {
                 if (getNativeFullscreenElement()) {
                     isChatFullscreen.value = false;
@@ -7722,7 +7789,7 @@ const app = createApp({
             const imageGenRegexContent = {
                 name: imageGenRegexName,
                 regex: '/image###([\\s\\S]*?)###/g',
-            replacement: `<div class="generated-image-card is-generating" data-image-request="${imageRequestUrl}" style="width:100%;height:auto;max-width:100%;box-sizing:border-box;padding:2px;border:1px solid rgba(255,255,255,.58);background:transparent;position:relative;border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 14px rgba(148,163,184,.06)"><img alt="" style="max-width:100%;height:100%;width:100%;display:block;object-fit:contain;border-radius:9px;transition:transform .3s ease"><div class="generated-image-progress" aria-live="polite"><svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span></div><button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button></div>`,
+            replacement: `<div class="generated-image-card is-generating" data-image-request="${imageRequestUrl}" style="width:100%;height:auto;max-width:100%;box-sizing:border-box;padding:2px;border:1px solid rgba(255,255,255,.58);background:transparent;position:relative;border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 14px rgba(148,163,184,.06)"><img alt="" style="max-width:100%;height:100%;width:100%;display:block;object-fit:contain;border-radius:9px;transition:transform .3s ease"><div class="generated-image-progress" aria-live="polite"><svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span></div><button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button><button type="button" class="generated-image-save" title="保存图片" aria-label="保存图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg></button></div>`,
                 placement: [2],
                 markdownOnly: true,
                 promptOnly: false,
@@ -9237,7 +9304,7 @@ const app = createApp({
             editorTab, characterDisplayLimit, hasOpenedCharacterManager, isDesktopCharacterLayout, displayedCharacters, loadMoreCharacters,
             isAutoImageGenEnabled,
             apiStatus, apiLatency, imageGenStatus, imageGenLatency, checkAllStatuses, // Status Exports
-            toggleAutoImageGen, setWorldInfoEnabled, handleGeneratedImageReroll,
+            toggleAutoImageGen, setWorldInfoEnabled, handleGeneratedImageReroll, handleGeneratedImageSave,
             quotaValue, quotaLoading, quotaError,
             // Memory System Exports
             classicMemoryPage, classicMemoryPageCount, memorySettings, retryingClassicMemoryId, retryClassicMemory,
@@ -9381,7 +9448,7 @@ const app = createApp({
                 showToast(`成功导入 ${normalized.length} 个分片`, 'success');
             }, error => showToast(`导入失败: ${error.message || 'JSON 格式错误'}`, 'error')),
             toggleMobileMenu, closeMobileMenu,
-            fetchModels, selectModel, selectQuickModels, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
+            fetchModels, selectModel, selectQuickModels,             sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
             handleConfirm, handleCancel, // Export handlers
             copyMessage, playMessageActionFeedback, deleteMessage, regenerateMessage,
             editMessage, saveEditMessage, cancelEditMessage,

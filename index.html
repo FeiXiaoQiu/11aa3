@@ -8,14 +8,12 @@
     <title>RP Hub</title>
     <!-- GitHub Pages rebuild marker for CSS-only animation update. -->
     <!-- <link rel="icon" href="logo.jpg" type="image/jpeg"> -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <link rel="stylesheet" href="assets/vendor/fonts/lora.css">
+    <script src="assets/vendor/tailwind.js"></script>
+    <script src="assets/vendor/vue.global.prod.js"></script>
+    <script src="assets/vendor/marked.min.js"></script>
+    <script src="assets/vendor/purify.min.js"></script>
+    <script src="assets/vendor/sortable.min.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -409,7 +407,7 @@
                                 <!-- Message Bubble -->
                                 <div class="group relative"
                                     :class="{'w-full': messageUsesWideLayout(msg), 'message-edit-group': msg.isEditing_Message}">
-                                    <div @click="handleGeneratedImageReroll($event, index)"
+                                    <div @click="handleGeneratedImageReroll($event, index); handleGeneratedImageSave($event, index)"
                                         :class="['p-0 rounded-2xl shadow-sm text-sm md:text-base leading-relaxed overflow-hidden',
                                         msg.shouldAnimate && !(msg.role === 'assistant' && msg.reasoning) ? 'animate-message-in' : '',
                                         messageUsesWideLayout(msg) ? 'w-full' : '',
@@ -922,7 +920,7 @@
                         </div>
                         <div class="relative w-full flex items-end gap-2 px-1">
                             <textarea v-model="userInput" @input="autoResizeInput" @focus="handleChatInputFocus"
-                                @blur="handleChatInputBlur" @keydown.enter.exact.prevent="sendMessage"
+                                @blur="handleChatInputBlur"
                                 :placeholder="'输入消息...'"
                                 class="flex-1 bg-gray-100/70 text-gray-800 rounded-2xl px-4 py-2.5 md:px-4 md:py-2.5 focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-400 resize-none border border-transparent shadow-inner transition-all focus:bg-white chat-input-scrollbar min-h-[44px] md:min-h-[46px] max-h-[140px] md:max-h-[160px]"
                                 rows="1" ref="inputBox"></textarea>

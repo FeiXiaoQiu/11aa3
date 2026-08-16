@@ -1452,14 +1452,38 @@
         return output;
     };
 
-    const htmlIframeSandbox = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-same-origin allow-downloads allow-pointer-lock allow-presentation allow-top-navigation-by-user-activation';
+    // 生成式 HTML 渲染沙箱。allow-same-origin 使 iframe 内外同源，
+    // 从而可读写 frameElement / contentDocument 实现可靠的高度自适应。
+    const htmlIframeSandbox = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock allow-presentation allow-top-navigation-by-user-activation';
 
-    const buildExecutableHtmlDocument = (rawHtml) => {
+    // postMessage 兜底通道：即使 frameElement 不可用，仍可通过消息上报高度。
+    let executableFrameSeq = 0;
+    const executableFrames = new Map();
+    const nextExecutableFrameId = () => {
+        executableFrameSeq += 1;
+        return 'rphubf' + executableFrameSeq + '_' + Date.now().toString(36);
+    };
+    const registerExecutableFrame = (iframe, frameId) => {
+        executableFrames.set(frameId, iframe);
+    };
+    window.addEventListener('message', (event) => {
+        const data = event.data;
+        if (!data || typeof data !== 'object' || data.__rphubFrameHeight !== true) return;
+        const iframe = executableFrames.get(data.id);
+        if (!iframe || event.source !== iframe.contentWindow) return;
+        if (typeof data.height === 'number' && data.height > 0) {
+            iframe.style.height = Math.round(data.height) + 'px';
+        }
+    });
+
+    const buildExecutableHtmlDocument = (rawHtml, frameId) => {
+        const safeFrameId = String(frameId || '').replace(/[^a-zA-Z0-9_-]/g, '');
         const metaViewport = '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">';
         const resetStyle = '<style>html,body{margin:0!important;padding:0!important;width:100%!important;height:auto!important;min-height:auto!important;word-wrap:break-word!important;box-sizing:border-box!important;overflow:hidden!important;}::-webkit-scrollbar{display:none;}*,*::before,*::after{box-sizing:inherit!important;}img,video,canvas,svg{max-width:100%!important;height:auto!important;}table{display:block!important;overflow-x:auto!important;max-width:100%!important;}pre{white-space:pre-wrap!important;word-wrap:break-word!important;max-width:100%!important;}.container,.reality-panel,.app-container{max-width:100%!important;width:100%!important;margin:0!important;border-radius:0!important;box-shadow:none!important;border:none!important;height:auto!important;min-height:0!important;}body>div:first-child{margin:0!important;max-width:100%!important;height:auto!important;min-height:0!important;}#app{height:auto!important;min-height:auto!important;}.bottom-safe{display:none!important;height:0!important;min-height:0!important;margin:0!important;padding:0!important;}</style>';
         const jqueryScript = '<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js" defer><\/script>';
         const scriptShim = `
             <script>
+                window.__rphubFrameId = "${safeFrameId}";
                 window.triggerSlash = function(text) {
                     if (window.parent && window.parent.triggerSlash) window.parent.triggerSlash(text);
                 };
@@ -1467,7 +1491,7 @@
                 let lastHeight = 0;
                 let isUpdating = false;
                 function updateHeight() {
-                    if (!window.frameElement || isUpdating) return;
+                    if (isUpdating) return;
                     isUpdating = true;
                     requestAnimationFrame(function() {
                         var body = document.body;
@@ -1489,9 +1513,14 @@
                         var bodyStyle = window.getComputedStyle(body);
                         var marginBottom = parseFloat(bodyStyle.marginBottom) || 0;
                         var newHeight = Math.max(maxBottom + marginBottom, body.scrollHeight) + 4;
-                        if (Math.abs(newHeight - lastHeight) > 0) {
+                        if (Math.abs(newHeight - lastHeight) > 1) {
                             lastHeight = newHeight;
-                            window.frameElement.style.height = newHeight + 'px';
+                            if (window.frameElement) {
+                                try { window.frameElement.style.height = newHeight + 'px'; } catch (e) {}
+                            }
+                            try {
+                                window.parent.postMessage({ __rphubFrameHeight: true, id: window.__rphubFrameId || '', height: newHeight }, '*');
+                            } catch (e) {}
                         }
                         isUpdating = false;
                     });
@@ -1564,6 +1593,7 @@ ${content}
 
     const createExecutableHtmlIframe = (rawHtml, extraClass = '') => {
         const iframe = document.createElement('iframe');
+        const frameId = nextExecutableFrameId();
         iframe.className = `w-full bg-white block executable-html-frame ${extraClass}`.trim();
         iframe.style.height = 'auto';
         iframe.style.overflow = 'hidden';
@@ -1585,7 +1615,8 @@ ${content}
                 console.warn('Failed to resize iframe:', error);
             }
         };
-        iframe.srcdoc = buildExecutableHtmlDocument(rawHtml);
+        iframe.srcdoc = buildExecutableHtmlDocument(rawHtml, frameId);
+        registerExecutableFrame(iframe, frameId);
         return iframe;
     };
 

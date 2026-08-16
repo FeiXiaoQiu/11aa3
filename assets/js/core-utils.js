@@ -860,6 +860,21 @@ window.RPHubUtils = {
     });
 
     const downloadBlob = (blob, filename, options = {}) => {
+        const native = window.RoleplayHubNative;
+        if (native && typeof native.saveFile === 'function') {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const dataUrl = String(reader.result || '');
+                const base64 = dataUrl.includes(',') ? dataUrl.substring(dataUrl.indexOf(',') + 1) : dataUrl;
+                const name = filename || ('download_' + Date.now());
+                try {
+                    native.saveFile(base64, name, blob.type || '');
+                } catch (_) { /* 原生不可用时静默回退 */ }
+            };
+            reader.onerror = () => { };
+            reader.readAsDataURL(blob);
+            return;
+        }
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
