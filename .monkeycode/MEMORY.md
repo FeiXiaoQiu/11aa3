@@ -74,3 +74,12 @@ Entries discovered by the Agent during task execution should follow this format:
   - 构建命令：`export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 && export ANDROID_HOME=/opt/android-sdk && export ANDROID_SDK_ROOT=/opt/android-sdk && cd /workspace/android-app && /opt/gradle-8.7/bin/gradle clean assembleRelease -x lintVitalRelease --no-daemon`
   - 签名材料：`/workspace/android-app/roleplayhub-release.keystore` + `keystore.properties`（`keyAlias=roleplayhub`，storeFile 默认取 `roleplayhub-release.keystore`）。
   - 签名仅启用 V2（`enableV1Signing=false`、`enableV2Signing=true`），minSdk 24 / targetSdk 34 / compileSdk 34，AGP 8.3.2 / Kotlin 1.9.22。
+
+[远程仓库与发布工作流]
+- Date: 2026-08-17
+- Context: 绑定 GitHub 远程仓库后
+- Category: Workflow & Collaboration
+- Instructions:
+  - 远程仓库：`git@github.com:FeiXiaoQiu/11aa3.git`（origin），本地 `master` 对应远程 `main`。
+  - 推送走 SSH over 443：SSH config 已配 `Host github.com → ssh.github.com:443`，私钥 `~/.ssh/id_ed25519_rphub`，GitHub 部署密钥（含写权限）已生效，不使用 token。
+  - 发布流程：先本地构建验证（无问题）→ 再触发 GitHub Actions 工作流构建 → 发 release。
