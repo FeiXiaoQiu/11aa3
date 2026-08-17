@@ -18,7 +18,7 @@
 
 - **Android 客户端（WebView 封装）**（`android-app/`）：以原生 WebView 容器加载打包进 APK 的前端页面，通过 JavaScript 桥（JSBridge）提供文件下载、图片保存、数据备份与在线更新。
 - **在线人数服务**（`presence-server/`）：无需数据库的匿名在线人数接口，可部署到 Zeabur。
-- **发布流程**：版本号规范、本地构建验证与 GitHub Actions 发布。
+- **自动化发布**：GitHub Actions 自动构建 APK 并发布到 Releases。
 
 ---
 
@@ -26,34 +26,29 @@
 
 `android-app/` 是一个 Kotlin 编写的 Android 原生工程。它以原生 WebView 作为渲染容器，加载打包进 APK 的前端资源（HTML/CSS/JS），并通过 JavaScript 桥（JSBridge）把网页里的调用转发到 Android 系统能力，实现文件下载、图片保存、数据备份与在线更新。
 
-### 打包与交付
+### 构建
 
-前端资源位于 `android-app/app/src/main/assets/www/`，需与根目录 `assets/`、`character/`、`novel/` 及 `index.html` 保持同步。构建前请先同步前端资源并 `diff` 校验一致，再执行构建。
+`android-app/` 需要 JDK 17 与 Android SDK 环境。前端资源位于 `android-app/app/src/main/assets/www/`，构建前请先将其与根目录的 `index.html`、`assets/`、`character/`、`novel/` 同步。
 
 ```bash
-# 同步前端资源到 android-app（由发布流程维护，此处示意）
-# 同步后校验：diff -r assets android-app/app/src/main/assets/www
-
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-export ANDROID_HOME=/opt/android-sdk
-export ANDROID_SDK_ROOT=/opt/android-sdk
 cd android-app
-/opt/gradle-8.7/bin/gradle clean assembleRelease -x lintVitalRelease --no-daemon
+./gradlew clean assembleRelease
 ```
 
-构建产物输出到 `android-app/app/build/outputs/apk/release/`，交付物按版本号归档到根目录 `release/RoleplayHub-Beta-<versionName>.apk`。
+构建产物位于 `android-app/app/build/outputs/apk/release/`，发布版本按版本号命名，归档在根目录 `release/` 下。
 
 ### 版本号规则
 
 - 采用三段式语义化版本 `Beta-x.y.z`（如 `Beta-1.3.7`）。
-- `versionName=Beta-x.y.z`，`versionCode` 对应纯数字（如 `137`）。
-- 版本递增时按语义化规则逐位递增，禁止跳位（如 `Beta-1.2.10`）。
+- `versionName=Beta-x.y.z`，`versionCode` 为去掉 `Beta-` 前缀与点号后的纯数字（如 `137`）。
+- 版本递增按语义化规则逐位递增。
 
 ### 签名
 
 - 密钥库：`android-app/roleplayhub-release.keystore`
 - 签名配置：`android-app/keystore.properties`（`keyAlias=roleplayhub`）
-- `local.properties` 与 `keystore.properties` 含本机敏感路径，已被 `.gitignore` 排除，请勿提交。
+
+发布用的签名文件不随仓库分发，自行构建时请在 `android-app/` 下提供对应的 `roleplayhub-release.keystore` 与 `keystore.properties`。
 
 ### 原生桥（JSBridge）说明
 
@@ -87,11 +82,9 @@ cd android-app
 
 ---
 
-## 发布流程 (Release)
+## 发布 (Release)
 
-1. 本地同步前端资源并 `diff` 校验一致，执行 `assembleRelease` 构建验证。
-2. 本地验证通过后，推送源码到远程 `main` 分支，触发 GitHub Actions 构建并发布 release。
-3. 交付 APK 归档到 `release/`，删除同目录旧版本。
+发布版本由 GitHub Actions 自动构建并发布，构建产物可在仓库的 [Releases](https://github.com/FeiXiaoQiu/11aa3/releases) 页面下载。发布前会在本地完成一次构建验证，确保产物可用后再推送触发 CI。
 
 ---
 
@@ -126,7 +119,7 @@ Roleplay-Hub/
 │       │   └── UpdateManager.kt           # 资源包在线更新
 │       ├── assets/www/            # 打包进 APK 的前端资源（与根目录同步）
 │       └── res/                   # 图标与主题资源
-├── release/                       # 已构建的 APK 交付物
+├── release/                       # APK 发布产物
 └── README.md                      # 项目说明
 ```
 
