@@ -20,4 +20,29 @@ class RoleplayHubNativeBridge(private val activity: MainActivity) {
     fun setFullscreen(enabled: Boolean) {
         activity.setFullscreen(enabled)
     }
+
+    @JavascriptInterface
+    fun beginPlainBackup(fileCount: Int) {
+        activity.beginPlainBackup(fileCount)
+    }
+
+    @JavascriptInterface
+    fun beginPlainBackupFile(path: String, size: Int) {
+        activity.beginPlainBackupFile(path, size)
+    }
+
+    @JavascriptInterface
+    fun addPlainBackupChunk(base64: String) {
+        activity.addPlainBackupChunk(base64)
+    }
+
+    @JavascriptInterface
+    fun endPlainBackupFile() {
+        activity.endPlainBackupFile()
+    }
+
+    @JavascriptInterface
+    fun finishPlainBackup() {
+        activity.finishPlainBackup()
+    }
 }

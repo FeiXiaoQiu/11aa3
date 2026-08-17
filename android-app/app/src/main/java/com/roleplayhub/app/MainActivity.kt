@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.util.Base64
 import android.view.Gravity
 import android.view.MenuItem
 import android.view.MotionEvent
@@ -34,7 +35,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
+import org.json.JSONObject
 import java.text.SimpleDateFormat
+import java.util.ArrayDeque
 import java.util.Date
 import java.util.Locale
 
@@ -54,6 +57,8 @@ class MainActivity : AppCompatActivity() {
     private var savedNavigationBarColor = 0
     private var isFullscreen = false
     private var pendingSaveFile: PendingSaveFile? = null
+    private val plainBackupReceiver = PlainBackupReceiver()
+    private var pendingPlainBackupFiles: List<PlainBackupManager.PlainFile>? = null
 
     private val imageSavePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val url = pendingImageSaveUrl
@@ -117,20 +122,17 @@ class MainActivity : AppCompatActivity() {
         callback.onReceiveValue(null)
     }
 
-    private val exportBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
-        if (uri == null) return@registerForActivityResult
-        val ok = BackupManager.exportData(this, uri)
-        val msg = getString(if (ok) R.string.export_success else R.string.export_failed)
-        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+    private val exportPlainBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        val files = pendingPlainBackupFiles
+        pendingPlainBackupFiles = null
+        if (uri == null || files == null) return@registerForActivityResult
+        val ok = PlainBackupManager.writeZip(files, uri, this)
+        Toast.makeText(this, if (ok) getString(R.string.export_success) else getString(R.string.export_failed), Toast.LENGTH_SHORT).show()
     }
 
     private val restoreBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
-        val ok = BackupManager.restoreData(this, uri)
-        Toast.makeText(this, if (ok) "数据恢复成功，即将刷新页面" else "数据恢复失败", Toast.LENGTH_SHORT).show()
-        if (ok) {
-            webView.postDelayed({ webView.reload() }, 400)
-        }
+        handleBackupRestore(uri)
     }
 
     private val notifyPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -316,12 +318,11 @@ class MainActivity : AppCompatActivity() {
         popup.setOnMenuItemClickListener { item: MenuItem ->
             when (item.itemId) {
                 2 -> {
-                    val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                    exportBackup.launch("RoleplayHub_backup_" + stamp + ".zip")
+                    startPlainBackupExport()
                     true
                 }
                 3 -> {
-                    restoreBackup.launch(arrayOf("application/zip", "application/octet-stream"))
+                    restoreBackup.launch(arrayOf("application/zip", "application/octet-stream", "image/png", "application/json", "application/x-ndjson"))
                     true
                 }
                 4 -> {
@@ -336,6 +337,126 @@ class MainActivity : AppCompatActivity() {
             }
         }
         popup.show()
+    }
+
+    private fun startPlainBackupExport() {
+        webView.evaluateJavascript(
+            "window.RPHubPlainBackup && window.RPHubPlainBackup.exportAll ? window.RPHubPlainBackup.exportAll() : (function(){})()",
+            null
+        )
+    }
+
+    fun beginPlainBackup(fileCount: Int) {
+        plainBackupReceiver.begin(fileCount)
+    }
+
+    fun beginPlainBackupFile(path: String, size: Int) {
+        plainBackupReceiver.beginFile(path)
+    }
+
+    fun addPlainBackupChunk(base64: String) {
+        plainBackupReceiver.addChunk(base64)
+    }
+
+    fun endPlainBackupFile() {
+        plainBackupReceiver.endFile()
+    }
+
+    fun finishPlainBackup() {
+        val files = plainBackupReceiver.takeFiles()
+        if (files.isEmpty()) {
+            runOnUiThread { Toast.makeText(this, "没有可导出的数据", Toast.LENGTH_SHORT).show() }
+            return
+        }
+        runOnUiThread {
+            pendingPlainBackupFiles = files
+            val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            exportPlainBackup.launch("RoleplayHub_backup_" + stamp + ".zip")
+        }
+    }
+
+    private fun handleBackupRestore(uri: Uri) {
+        val resolver = contentResolver
+        val mime = resolver.getType(uri) ?: ""
+        val name = resolveDisplayName(uri)
+        val isZip = mime == "application/zip"
+            || mime == "application/octet-stream"
+            || name.endsWith(".zip", ignoreCase = true)
+        if (isZip) {
+            val files = PlainBackupManager.readZip(this, uri)
+            if (files == null) {
+                Toast.makeText(this, "备份读取失败", Toast.LENGTH_SHORT).show()
+                return
+            }
+            if (PlainBackupManager.isPlainBackupZip(files)) {
+                importPlainBackupFiles(files)
+            } else {
+                val ok = BackupManager.restoreData(this, uri)
+                Toast.makeText(this, if (ok) "数据恢复成功，即将刷新页面" else "数据恢复失败", Toast.LENGTH_SHORT).show()
+                if (ok) {
+                    webView.postDelayed({ webView.reload() }, 400)
+                }
+            }
+            return
+        }
+        val lowerName = name.lowercase(Locale.ROOT)
+        if (lowerName.endsWith(".png") || lowerName.endsWith(".json") || lowerName.endsWith(".jsonl")) {
+            val bytes = PlainBackupManager.readUriBytes(this, uri)
+            if (bytes == null) {
+                Toast.makeText(this, "文件读取失败", Toast.LENGTH_SHORT).show()
+                return
+            }
+            importPlainBackupFiles(listOf(PlainBackupManager.PlainFile(name, bytes)))
+        } else {
+            Toast.makeText(this, "不支持的文件格式", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun importPlainBackupFiles(files: List<PlainBackupManager.PlainFile>) {
+        val queue = ArrayDeque<String>()
+        queue.add("window.RPHubPlainBackup ? window.RPHubPlainBackup.importBegin(${files.size}) : ''")
+        for (file in files) {
+            val base64 = PlainBackupManager.encodeBase64(file.bytes)
+            val chunkSize = 256 * 1024
+            var offset = 0
+            while (offset < base64.length) {
+                val end = minOf(offset + chunkSize, base64.length)
+                val chunk = base64.substring(offset, end)
+                val isLast = end >= base64.length
+                queue.add(
+                    "window.RPHubPlainBackup.importFileChunk(${JSONObject.quote(file.path)}, '$chunk', $isLast)"
+                )
+                offset = end
+            }
+        }
+        queue.add("window.RPHubPlainBackup.importFinish()")
+        drainImportQueue(queue)
+    }
+
+    private fun drainImportQueue(queue: ArrayDeque<String>) {
+        val js = queue.pollFirst()
+        if (js == null) {
+            return
+        }
+        webView.evaluateJavascript(js) { drainImportQueue(queue) }
+    }
+
+    private fun resolveDisplayName(uri: Uri): String {
+        var result: String? = null
+        try {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (index >= 0) result = cursor.getString(index)
+                }
+            }
+        } catch (_: Exception) {
+        }
+        if (result.isNullOrBlank()) {
+            result = uri.lastPathSegment
+        }
+        val name = result?.takeIf { it.isNotBlank() }
+        return name ?: "backup"
     }
 
     fun requestSaveImage(url: String) {
@@ -428,4 +549,35 @@ class MainActivity : AppCompatActivity() {
     data class PendingDownload(val url: String, val contentDisposition: String?, val mimeType: String?)
 
     data class PendingSaveFile(val base64: String, val fileName: String, val mimeType: String)
+
+    class PlainBackupReceiver {
+        private val files = mutableListOf<PlainBackupManager.PlainFile>()
+        private var currentName = ""
+        private val buffer = StringBuilder()
+
+        fun begin(fileCount: Int) {
+            files.clear()
+            currentName = ""
+            buffer.setLength(0)
+        }
+
+        fun beginFile(path: String) {
+            currentName = path
+            buffer.setLength(0)
+        }
+
+        fun addChunk(base64: String) {
+            buffer.append(base64)
+        }
+
+        fun endFile() {
+            if (currentName.isNotBlank()) {
+                val bytes = Base64.decode(buffer.toString(), Base64.DEFAULT)
+                files.add(PlainBackupManager.PlainFile(currentName, bytes))
+            }
+            buffer.setLength(0)
+        }
+
+        fun takeFiles(): List<PlainBackupManager.PlainFile> = files.toList()
+    }
 }

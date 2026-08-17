@@ -9533,6 +9533,344 @@ const app = createApp({
             if (thirdPersonPreset) thirdPersonPreset.enabled = user.person === 'third';
         };
 
+        // --- 明文备份（Plain Backup）---
+        // 138 起备份统一导出为可读的明文文件（角色卡 PNG + 聊天记录 JSONL），
+        // 通过原生桥分块传输，由原生打包为 zip 保存；导入同时兼容明文与旧内部数据。
+        const plainBackupChunkSize = 256 * 1024;
+
+        const bytesToBase64 = (bytes) => {
+            let binary = '';
+            const chunk = 0x8000;
+            for (let i = 0; i < bytes.length; i += chunk) {
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunk, bytes.length)));
+            }
+            return btoa(binary);
+        };
+
+        const base64ToBytes = (base64) => {
+            const binary = atob(String(base64 || '').trim());
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+            return bytes;
+        };
+
+        const plainBackupSanitizeFileName = (name) => {
+            const cleaned = String(name || 'character').replace(/[\\/:*?"<>|\r\n\t]/g, '_').trim();
+            return cleaned || 'character';
+        };
+
+        const buildCharacterChatJsonl = async (index) => {
+            const char = characters.value[index];
+            if (!char) return null;
+            if (!getMainDb()) await initDB();
+            const isCurrentCharacter = currentCharacterIndex.value === index;
+            if (isCurrentCharacter) await flushPendingChatHistorySave();
+            const savedBranches = char.uuid ? await getScopedStoredValue('branches', char.uuid) : null;
+            const branches = isCurrentCharacter
+                ? cloneForStorage(storyBranches.value)
+                : normalizeStoryBranches(char, savedBranches);
+            const activeBranchId = isCurrentCharacter
+                ? activeStoryBranchId.value
+                : String(savedBranches?.activeBranchId || STORY_BRANCH_MAIN_ID);
+            const branchChats = await Promise.all(branches.map(async branch => {
+                let messages;
+                if (isCurrentCharacter && branch.id === activeStoryBranchId.value) {
+                    messages = cloneForStorage(chatHistory.value);
+                } else if (char.uuid) {
+                    messages = await getScopedStoredValue('chat', getStoryBranchScopeId(char.uuid, branch.id));
+                }
+                if (messages === undefined && branch.id === STORY_BRANCH_MAIN_ID) {
+                    messages = await getScopedStoredValue('chat', index);
+                }
+                return { branchId: branch.id, messages: Array.isArray(messages) ? cloneForStorage(messages) : [] };
+            }));
+            const totalMessages = branchChats.reduce((sum, branch) => sum + branch.messages.length, 0);
+            if (!totalMessages) return null;
+            const chatByBranch = new Map(branchChats.map(branch => [branch.branchId, branch.messages]));
+            const branchMetadata = branches.map(branch => {
+                const messages = chatByBranch.get(branch.id) || [];
+                return {
+                    ...branch,
+                    floorCount: getPostprocessedChatMessages(messages, { includeSystem: false }).length,
+                    messageCount: messages.filter(message => ['user', 'assistant'].includes(message?.role)).length,
+                    wordCount: getConversationBodyLength(messages)
+                };
+            });
+            const manifest = {
+                type: STORY_BRANCH_CHAT_EXPORT_TYPE,
+                version: STORY_BRANCH_CHAT_EXPORT_VERSION,
+                characterName: char.name || '',
+                exportedAt: new Date().toISOString(),
+                activeBranchId: branchMetadata.some(branch => branch.id === activeBranchId) ? activeBranchId : STORY_BRANCH_MAIN_ID,
+                branches: branchMetadata
+            };
+            const lines = [manifest, ...branchChats].map(record => JSON.stringify(record)).join('\n');
+            return { lines, characterName: char.name || '' };
+        };
+
+        const collectPlainBackupFiles = async () => {
+            const files = [];
+            const charManifest = [];
+            for (let i = 0; i < characters.value.length; i += 1) {
+                const char = characters.value[i];
+                const name = plainBackupSanitizeFileName(char.name);
+                try {
+                    const v2Data = buildCharacterExportData(char);
+                    const pngBytes = await cardUtils.imageUrlToPngBytes(char.avatar, { crossOrigin: 'Anonymous' });
+                    const finalPng = cardUtils.injectPngTextChunk(pngBytes, 'chara', cardUtils.encodeBase64Utf8(JSON.stringify(v2Data)));
+                    files.push({ path: 'characters/' + name + '_' + i + '.png', base64: bytesToBase64(finalPng) });
+                } catch (pngErr) {
+                    console.error('Plain backup PNG error for', char.name, pngErr);
+                }
+                try {
+                    const chat = await buildCharacterChatJsonl(i);
+                    if (chat) {
+                        files.push({ path: 'chats/' + name + '_' + i + '.jsonl', base64: cardUtils.encodeBase64Utf8(chat.lines) });
+                    }
+                } catch (chatErr) {
+                    console.error('Plain backup chat error for', char.name, chatErr);
+                }
+                charManifest.push({ index: i, name: char.name || '', uuid: char.uuid || null });
+            }
+            const manifest = {
+                format: 'rphub-plain-backup',
+                version: 1,
+                exportedAt: new Date().toISOString(),
+                characters: charManifest
+            };
+            files.push({ path: 'manifest.json', base64: cardUtils.encodeBase64Utf8(JSON.stringify(manifest, null, 2)) });
+            return files;
+        };
+
+        const exportAllPlainBackup = async () => {
+            try {
+                const files = await collectPlainBackupFiles();
+                const native = window.RoleplayHubNative;
+                if (!native || typeof native.beginPlainBackup !== 'function') {
+                    showToast('当前环境不支持明文备份', 'error');
+                    return;
+                }
+                if (!files.length) {
+                    showToast('没有可导出的数据', 'warning');
+                    return;
+                }
+                native.beginPlainBackup(files.length);
+                for (const file of files) {
+                    native.beginPlainBackupFile(file.path, file.base64.length);
+                    for (let off = 0; off < file.base64.length; off += plainBackupChunkSize) {
+                        native.addPlainBackupChunk(file.base64.substring(off, off + plainBackupChunkSize));
+                    }
+                    native.endPlainBackupFile();
+                }
+                native.finishPlainBackup();
+                showToast('正在生成明文备份…', 'info');
+            } catch (e) {
+                console.error('Plain backup export error:', e);
+                showToast('明文备份导出失败: ' + (e?.message || e), 'error');
+            }
+        };
+
+        const buildCharacterFromImport = (rawData, avatarUrl) => {
+            const imported = cardUtils.parseImportedCharacterCard(rawData);
+            return {
+                name: imported.name,
+                description: imported.description,
+                first_mes: imported.first_mes,
+                avatar: avatarUrl || defaultAvatar,
+                personality: imported.personality,
+                creator_notes: imported.creator_notes,
+                worldInfo: imported.worldInfoEntries
+                    .map(entry => normalizeWorldInfoEntry({ ...entry, scope: 'character' }))
+                    .filter(entry => entry.scope !== 'global'),
+                regexScripts: imported.regexScripts
+                    .map(script => cardUtils.normalizeImportedRegexScript(
+                        { ...script, scope: 'character' },
+                        { fallbackScope: 'character', systemNames: systemRegexNames }
+                    ))
+                    .filter(script => script.scope !== 'global'),
+                uiTemplates: imported.uiTemplates.map(template => normalizeUiTemplate({
+                    ...sanitizeUiTemplateImportEntry(template),
+                    id: generateUUID(),
+                    scope: 'character'
+                })),
+                recentGenerationTimes: [],
+                uuid: generateUUID(),
+                createdAt: Date.now()
+            };
+        };
+
+        const importChatJsonlForCharacter = async (char, text) => {
+            const records = String(text || '')
+                .split(/\r?\n/)
+                .filter(line => line.trim())
+                .map(line => JSON.parse(line));
+            if (!records.length) return 0;
+            if (records.some(message => !message || typeof message !== 'object' || Array.isArray(message))) {
+                throw new Error('聊天记录包含无效消息');
+            }
+            if (records[0]?.type === STORY_BRANCH_CHAT_EXPORT_TYPE) {
+                const manifest = records[0];
+                if (Number(manifest.version) !== STORY_BRANCH_CHAT_EXPORT_VERSION) {
+                    throw new Error('不支持的分支聊天版本：' + manifest.version);
+                }
+                if (!Array.isArray(manifest.branches) || !manifest.branches.length) {
+                    throw new Error('文件中没有分支信息');
+                }
+                const chatByBranch = new Map();
+                records.slice(1).forEach(record => {
+                    const branchId = String(record?.branchId || '').trim();
+                    if (!branchId || !Array.isArray(record?.messages)) throw new Error('分支聊天数据不完整');
+                    if (record.messages.some(message => !message || typeof message !== 'object' || Array.isArray(message))) {
+                        throw new Error('分支"' + branchId + '"包含无效消息');
+                    }
+                    if (chatByBranch.has(branchId)) throw new Error('分支"' + branchId + '"重复');
+                    chatByBranch.set(branchId, cloneForStorage(record.messages));
+                });
+                const importedBranches = normalizeStoryBranches(char, { branches: manifest.branches });
+                importedBranches.forEach(branch => {
+                    if (!chatByBranch.has(branch.id)) throw new Error('缺少分支"' + branch.name + '"的聊天记录');
+                    const messages = chatByBranch.get(branch.id);
+                    branch.floorCount = getPostprocessedChatMessages(messages, { includeSystem: false }).length;
+                    branch.messageCount = messages.filter(message => ['user', 'assistant'].includes(message.role)).length;
+                    branch.wordCount = getConversationBodyLength(messages);
+                });
+                const importedIds = new Set(importedBranches.map(branch => branch.id));
+                if ([...chatByBranch.keys()].some(branchId => !importedIds.has(branchId))) {
+                    throw new Error('聊天记录中包含未知分支');
+                }
+                const importedActiveId = importedIds.has(String(manifest.activeBranchId))
+                    ? String(manifest.activeBranchId)
+                    : STORY_BRANCH_MAIN_ID;
+                await Promise.all([
+                    ...importedBranches.map(branch => setScopedStoredValue(
+                        'chat',
+                        getStoryBranchScopeId(char.uuid, branch.id),
+                        chatByBranch.get(branch.id),
+                        { clone: false }
+                    )),
+                    setScopedStoredValue('branches', char.uuid, {
+                        version: 1,
+                        activeBranchId: importedActiveId,
+                        branches: cloneForStorage(importedBranches)
+                    }, { clone: false })
+                ]);
+                return [...chatByBranch.values()].reduce((sum, messages) => sum + messages.length, 0);
+            }
+            const importedChat = cloneForStorage(records);
+            await setScopedStoredValue('chat', getStoryBranchScopeId(char.uuid, STORY_BRANCH_MAIN_ID), importedChat, { clone: false });
+            await setScopedStoredValue('branches', char.uuid, {
+                version: 1,
+                activeBranchId: STORY_BRANCH_MAIN_ID,
+                branches: normalizeStoryBranches(char, null)
+            }, { clone: false });
+            return importedChat.length;
+        };
+
+        const importAllPlainBackupFiles = async (files) => {
+            if (!Array.isArray(files) || !files.length) return '备份中没有数据';
+            const charFiles = files.filter(file => (file.path || '').startsWith('characters/'));
+            const chatFiles = files.filter(file => (file.path || '').startsWith('chats/'));
+            const nameToChar = new Map();
+
+            let importedChars = 0;
+            for (const file of charFiles) {
+                try {
+                    const path = file.path || '';
+                    if (path.toLowerCase().endsWith('.png')) {
+                        const bytes = base64ToBytes(file.base64);
+                        const { data } = cardUtils.parsePngCharacterData(bytes.buffer);
+                        const blob = new Blob([bytes], { type: 'image/png' });
+                        const avatarUrl = await cardUtils.blobToDataUrl(blob);
+                        const char = buildCharacterFromImport(data, avatarUrl);
+                        characters.value.push(char);
+                        nameToChar.set(char.name, char);
+                        importedChars += 1;
+                    } else if (path.toLowerCase().endsWith('.json')) {
+                        const text = cardUtils.decodeBase64Utf8(file.base64);
+                        const data = JSON.parse(text);
+                        const char = buildCharacterFromImport(data, null);
+                        characters.value.push(char);
+                        nameToChar.set(char.name, char);
+                        importedChars += 1;
+                    }
+                } catch (e) {
+                    console.error('Import character failed:', file.path, e);
+                }
+            }
+
+            let importedMessages = 0;
+            for (const file of chatFiles) {
+                try {
+                    const text = cardUtils.decodeBase64Utf8(file.base64);
+                    const records = text.split(/\r?\n/).filter(line => line.trim()).map(line => JSON.parse(line));
+                    const characterName = records[0]?.characterName || '';
+                    const char = nameToChar.get(characterName);
+                    if (!char) {
+                        console.warn('找不到对应角色，跳过聊天记录:', characterName);
+                        continue;
+                    }
+                    importedMessages += await importChatJsonlForCharacter(char, text);
+                } catch (e) {
+                    console.error('Import chat failed:', file.path, e);
+                }
+            }
+
+            if (!getMainDb()) await initDB();
+            await saveCharactersNow();
+            return '导入完成：' + importedChars + ' 个角色，' + importedMessages + ' 条聊天记录';
+        };
+
+        const plainBackupImportState = {
+            files: [],
+            currentPath: '',
+            currentBase64: ''
+        };
+
+        const importBeginPlainBackup = (count) => {
+            plainBackupImportState.files = [];
+            plainBackupImportState.currentPath = '';
+            plainBackupImportState.currentBase64 = '';
+        };
+
+        const importFileChunkPlainBackup = (path, base64, isLast) => {
+            const state = plainBackupImportState;
+            if (state.currentPath !== path) {
+                if (state.currentPath) {
+                    state.files.push({ path: state.currentPath, base64: state.currentBase64 });
+                }
+                state.currentPath = path;
+                state.currentBase64 = '';
+            }
+            state.currentBase64 += base64;
+            if (isLast) {
+                state.files.push({ path: state.currentPath, base64: state.currentBase64 });
+                state.currentPath = '';
+                state.currentBase64 = '';
+            }
+        };
+
+        const importFinishPlainBackup = async () => {
+            const files = plainBackupImportState.files;
+            plainBackupImportState.files = [];
+            plainBackupImportState.currentPath = '';
+            plainBackupImportState.currentBase64 = '';
+            try {
+                const message = await importAllPlainBackupFiles(files);
+                showToast(message, 'success', 4000);
+            } catch (e) {
+                console.error('Plain backup import error:', e);
+                showToast('明文备份导入失败: ' + (e?.message || e), 'error', 5000);
+            }
+            setTimeout(() => location.reload(), 1600);
+        };
+
+        window.RPHubPlainBackup = {
+            exportAll: exportAllPlainBackup,
+            importBegin: importBeginPlainBackup,
+            importFileChunk: importFileChunkPlainBackup,
+            importFinish: importFinishPlainBackup
+        };
+
         return {
             switchProfile, createNewProfile, deleteProfile, userProfiles, activeProfileId, showProfileDropdown,
             processMainContent, replaceUserNamePlaceholder,
