@@ -9982,7 +9982,29 @@ const app = createApp({
                 try {
                     const key = (file.path || '').replace(/^data\//, '').replace(/\.json$/i, '');
                     if (!key) continue;
-                    const value = JSON.parse(cardUtils.decodeBase64Utf8(file.base64));
+                    let value = JSON.parse(cardUtils.decodeBase64Utf8(file.base64));
+                    if (key === 'settings') {
+                        const current = await getStoredValue('settings');
+                        if (current && typeof current === 'object') {
+                            if (value.apiKey === undefined && current.apiKey !== undefined) value.apiKey = current.apiKey;
+                            if (value.apiProviderKeys === undefined && current.apiProviderKeys !== undefined) value.apiProviderKeys = current.apiProviderKeys;
+                            if (value.imageGenKey === undefined && current.imageGenKey !== undefined) value.imageGenKey = current.imageGenKey;
+                        }
+                    } else if (key === 'active_tools') {
+                        const current = await getStoredValue('active_tools');
+                        if (Array.isArray(value) && Array.isArray(current)) {
+                            const byId = new Map(current.filter(tool => tool && tool.id).map(tool => [tool.id, tool]));
+                            const byCallName = new Map(current.filter(tool => tool && tool.callName).map(tool => [tool.callName, tool]));
+                            value = value.map(tool => {
+                                if (!tool || typeof tool !== 'object' || tool.tavilyApiKey !== undefined) return tool;
+                                const match = byId.get(tool.id) || byCallName.get(tool.callName);
+                                if (match && match.tavilyApiKey !== undefined) {
+                                    return { ...tool, tavilyApiKey: match.tavilyApiKey };
+                                }
+                                return tool;
+                            });
+                        }
+                    }
                     await setStoredValue(key, value, { clone: false });
                     importedGlobals += 1;
                 } catch (e) {

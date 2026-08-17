@@ -344,7 +344,7 @@ class MainActivity : AppCompatActivity() {
     private fun showExportSubMenu() {
         AlertDialog.Builder(this)
             .setTitle("导出数据备份")
-            .setItems(arrayOf("导出完整数据", "导出精简版（不含图片）")) { _, which ->
+            .setItems(arrayOf("导出完整数据", "导出精简版（聊天记录不含图片）")) { _, which ->
                 startPlainBackupExport(stripImages = which == 1)
             }
             .setNegativeButton("取消", null)
