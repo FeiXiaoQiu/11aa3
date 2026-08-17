@@ -16,10 +16,9 @@ object PlainBackupManager {
 
     data class PlainFile(val path: String, val bytes: ByteArray)
 
-    fun writeZip(files: List<PlainFile>, outUri: Uri, context: Context, onProgress: ((done: Int, total: Int) -> Unit)? = null): Boolean {
+    fun writeZip(files: List<PlainFile>, targetFile: java.io.File, onProgress: ((done: Int, total: Int) -> Unit)? = null): Boolean {
         return try {
-            val resolver = context.contentResolver
-            val output = resolver.openOutputStream(outUri) ?: throw IllegalStateException("无法打开备份文件")
+            val output = java.io.FileOutputStream(targetFile)
             output.use { os ->
                 ZipOutputStream(os).use { zos ->
                     val seen = HashSet<String>()

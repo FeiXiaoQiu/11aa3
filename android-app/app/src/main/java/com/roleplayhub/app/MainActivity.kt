@@ -32,6 +32,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
@@ -57,6 +58,7 @@ class MainActivity : AppCompatActivity() {
     private var savedNavigationBarColor = 0
     private var isFullscreen = false
     private var pendingSaveFile: PendingSaveFile? = null
+    private var pendingBackupStripImages: Boolean? = null
     private val plainBackupReceiver = PlainBackupReceiver()
     private var pendingPlainBackupFiles: List<PlainBackupManager.PlainFile>? = null
 
@@ -99,6 +101,14 @@ class MainActivity : AppCompatActivity() {
         } else if (saveFile != null) {
             Toast.makeText(this, "未开启“所有文件访问”权限，无法下载文件", Toast.LENGTH_SHORT).show()
         }
+        val stripImages = pendingBackupStripImages
+        if (stripImages != null && hasAllFilesAccess()) {
+            pendingBackupStripImages = null
+            startPlainBackupExport(stripImages)
+        } else if (stripImages != null) {
+            pendingBackupStripImages = null
+            Toast.makeText(this, "未开启“所有文件访问”权限，无法导出备份", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -120,13 +130,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         callback.onReceiveValue(null)
-    }
-
-    private val exportPlainBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
-        val files = pendingPlainBackupFiles
-        pendingPlainBackupFiles = null
-        if (uri == null || files == null) return@registerForActivityResult
-        BackupExportService.writeZip(this, files, uri)
     }
 
     private val restoreBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -317,7 +320,7 @@ class MainActivity : AppCompatActivity() {
         popup.setOnMenuItemClickListener { item: MenuItem ->
             when (item.itemId) {
                 2 -> {
-                    startPlainBackupExport()
+                    showExportSubMenu()
                     true
                 }
                 3 -> {
@@ -338,7 +341,23 @@ class MainActivity : AppCompatActivity() {
         popup.show()
     }
 
-    private fun startPlainBackupExport() {
+    private fun showExportSubMenu() {
+        AlertDialog.Builder(this)
+            .setTitle("导出数据备份")
+            .setItems(arrayOf("导出完整数据", "导出时剥离图片附件")) { _, which ->
+                startPlainBackupExport(stripImages = which == 1)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun startPlainBackupExport(stripImages: Boolean) {
+        if (!hasAllFilesAccess()) {
+            pendingBackupStripImages = stripImages
+            Toast.makeText(this, "需要“所有文件访问”权限才能导出到下载目录", Toast.LENGTH_SHORT).show()
+            promptAllFilesAccess(null)
+            return
+        }
         Toast.makeText(this, "正在准备导出…", Toast.LENGTH_SHORT).show()
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -347,7 +366,7 @@ class MainActivity : AppCompatActivity() {
         }
         BackupExportService.startExport(this)
         webView.evaluateJavascript(
-            "window.RPHubPlainBackup && typeof window.RPHubPlainBackup.exportAll === 'function' ? (window.RPHubPlainBackup.exportAll(), 'ok') : 'unavailable'"
+            "window.RPHubPlainBackup && typeof window.RPHubPlainBackup.exportAll === 'function' ? (window.RPHubPlainBackup.exportAll($stripImages), 'ok') : 'unavailable'"
         ) { result ->
             val value = result?.trim()?.trim('"')
             if (value == "unavailable") {
@@ -384,10 +403,19 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread { Toast.makeText(this, "没有可导出的数据", Toast.LENGTH_SHORT).show() }
             return
         }
-        runOnUiThread {
-            pendingPlainBackupFiles = files
-            val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            exportPlainBackup.launch("RoleplayHub_backup_" + stamp + ".zip")
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val fileName = "RoleplayHub_backup_" + stamp + ".zip"
+        try {
+            val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            if (!downloadDir.exists() && !downloadDir.mkdirs()) {
+                runOnUiThread { Toast.makeText(this, "无法创建下载目录", Toast.LENGTH_SHORT).show() }
+                return
+            }
+            val target = java.io.File(downloadDir, fileName)
+            BackupExportService.writeZip(this, files, target.absolutePath)
+            runOnUiThread { Toast.makeText(this, "正在写入备份文件：Download/$fileName，进度见通知栏", Toast.LENGTH_LONG).show() }
+        } catch (e: Exception) {
+            runOnUiThread { Toast.makeText(this, "导出失败：" + (e.message ?: "未知错误"), Toast.LENGTH_SHORT).show() }
         }
     }
 

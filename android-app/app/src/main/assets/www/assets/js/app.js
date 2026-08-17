@@ -9559,7 +9559,7 @@ const app = createApp({
             return cleaned || 'character';
         };
 
-        const buildCharacterChatJsonl = async (index) => {
+        const buildCharacterChatJsonl = async (index, stripImages = false) => {
             const char = characters.value[index];
             if (!char) return null;
             if (!getMainDb()) await initDB();
@@ -9582,7 +9582,16 @@ const app = createApp({
                 if (messages === undefined && branch.id === STORY_BRANCH_MAIN_ID) {
                     messages = await getScopedStoredValue('chat', index);
                 }
-                return { branchId: branch.id, messages: Array.isArray(messages) ? cloneForStorage(messages) : [] };
+                messages = Array.isArray(messages) ? cloneForStorage(messages) : [];
+                if (stripImages) {
+                    messages = messages.map(message => {
+                        if (Array.isArray(message?.imageAttachments) && message.imageAttachments.length) {
+                            return { ...message, imageAttachments: [] };
+                        }
+                        return message;
+                    });
+                }
+                return { branchId: branch.id, messages };
             }));
             const totalMessages = branchChats.reduce((sum, branch) => sum + branch.messages.length, 0);
             if (!totalMessages) return null;
@@ -9651,7 +9660,7 @@ const app = createApp({
             return files;
         };
 
-        const collectPlainBackupFiles = async (onProgress) => {
+        const collectPlainBackupFiles = async (onProgress, stripImages = false) => {
             const files = [];
             const charManifest = [];
             const totalSteps = characters.value.length;
@@ -9673,7 +9682,7 @@ const app = createApp({
                     console.error('Plain backup PNG error for', char.name, pngErr);
                 }
                 try {
-                    const chat = await buildCharacterChatJsonl(i);
+                    const chat = await buildCharacterChatJsonl(i, stripImages);
                     if (chat) {
                         files.push({ path: 'chats/' + name + '_' + i + '.jsonl', base64: cardUtils.encodeBase64Utf8(chat.lines) });
                     }
@@ -9703,9 +9712,11 @@ const app = createApp({
             return files;
         };
 
-        const exportAllPlainBackup = async () => {
+        const exportAllPlainBackup = async (stripImages = false) => {
             try {
-                showToast('正在导出明文备份…，进度见通知栏', 'info');
+                showToast(stripImages
+                    ? '正在导出明文备份（已剥离图片附件）…，进度见通知栏'
+                    : '正在导出明文备份…，进度见通知栏', 'info');
                 const native = window.RoleplayHubNative;
                 if (!native || typeof native.beginPlainBackup !== 'function') {
                     showToast('当前环境不支持明文备份', 'error');
@@ -9719,7 +9730,7 @@ const app = createApp({
                     } catch (_) { /* 原生不可用时静默 */ }
                 };
                 await saveData({ saveMemories: true, saveCharacters: true });
-                const files = await collectPlainBackupFiles(safeProgress);
+                const files = await collectPlainBackupFiles(safeProgress, stripImages);
                 if (!files.length) {
                     showToast('没有可导出的数据', 'warning');
                     return;

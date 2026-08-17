@@ -8,7 +8,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -61,15 +60,15 @@ class BackupExportService : Service() {
                 }
             }
             ACTION_WRITE_ZIP -> {
-                val uri = intent.getParcelableExtra<Uri>(EXTRA_URI)
+                val path = intent.getStringExtra(EXTRA_PATH)
                 val files = pendingFiles
                 pendingFiles = null
-                if (uri == null || files.isNullOrEmpty()) {
+                if (path.isNullOrBlank() || files.isNullOrEmpty()) {
                     publish("导出失败", "备份数据为空", -1, false)
                     finish()
                     return START_NOT_STICKY
                 }
-                writeZipAsync(files, uri)
+                writeZipAsync(files, path)
             }
             else -> Unit
         }
@@ -114,10 +113,11 @@ class BackupExportService : Service() {
         return PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
-    private fun writeZipAsync(files: List<PlainBackupManager.PlainFile>, uri: Uri) {
+    private fun writeZipAsync(files: List<PlainBackupManager.PlainFile>, path: String) {
         enterForeground("正在写入备份文件…", "正在写入备份文件", true)
+        val fileName = path.substringAfterLast('/')
         Thread({
-            val ok = PlainBackupManager.writeZip(files, uri, this) { done, total ->
+            val ok = PlainBackupManager.writeZip(files, java.io.File(path)) { done, total ->
                 publish("正在写入备份文件…", "正在写入备份文件 $done/$total", (done * 100 / total).coerceIn(0, 100), false)
             }
             uiHandler.post {
@@ -125,7 +125,7 @@ class BackupExportService : Service() {
                     nm.notify(NOTIFICATION_ID, NotificationCompat.Builder(this, CHANNEL_ID)
                         .setSmallIcon(android.R.drawable.stat_sys_upload_done)
                         .setContentTitle("备份导出完成")
-                        .setContentText("明文备份已保存到所选位置")
+                        .setContentText("已保存到 Download/$fileName")
                         .setAutoCancel(true)
                         .setContentIntent(contentIntent())
                         .build())
@@ -154,7 +154,7 @@ class BackupExportService : Service() {
         private const val ACTION_START_EXPORT = "com.roleplayhub.app.BACKUP_START_EXPORT"
         private const val ACTION_UPDATE_PROGRESS = "com.roleplayhub.app.BACKUP_UPDATE_PROGRESS"
         private const val ACTION_WRITE_ZIP = "com.roleplayhub.app.BACKUP_WRITE_ZIP"
-        private const val EXTRA_URI = "extra_uri"
+        private const val EXTRA_PATH = "extra_path"
         private const val EXTRA_DONE = "extra_done"
         private const val EXTRA_TOTAL = "extra_total"
         private const val EXTRA_STAGE = "extra_stage"
@@ -180,11 +180,11 @@ class BackupExportService : Service() {
             context.startService(i)
         }
 
-        fun writeZip(context: Context, files: List<PlainBackupManager.PlainFile>, uri: Uri) {
+        fun writeZip(context: Context, files: List<PlainBackupManager.PlainFile>, path: String) {
             pendingFiles = files
             val i = Intent(context, BackupExportService::class.java)
                 .setAction(ACTION_WRITE_ZIP)
-                .putExtra(EXTRA_URI, uri)
+                .putExtra(EXTRA_PATH, path)
             if (Build.VERSION.SDK_INT >= 26) {
                 context.startForegroundService(i)
             } else {
