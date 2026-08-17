@@ -8,51 +8,43 @@ Roleplay Hub（RP-Hub）的第三方 Android 客户端。
 
 ---
 
-## 补充的能力
+## 功能特性
 
-纯前端在 WebView 里只能跑页面，以下能力是浏览器默认做不到、由本客户端原生代码补上的：
+除上游的前端功能外，本客户端通过原生代码补充了以下浏览器里做不到的能力：
 
 - **离线运行**：前端资源打包进 APK，无需联网、无需浏览器即可打开。
-- **图片保存**：把生成的角色图一键保存到系统相册目录（WebView 网页无法直接写相册）。
-- **文件下载**：把前端产生的文件写入系统下载目录，带前台进度通知（WebView 默认不提供本地下载）。
-- **沉浸式全屏**：对话与阅读时隐藏系统状态栏（网页无法控制系统 UI）。
-- **明文备份**：把全部数据以可读文件导出——角色卡（PNG）、聊天记录（JSONL）、记忆与全局数据（JSON），打包为 zip 保存；导入兼容明文备份与旧版（137 及以前）内部数据备份（网页的 localStorage 无法导出为系统文件）。
-  - 导出在后台执行，通知栏实时显示进度（收集数据 / 打包 / 写入）。
-  - 两种导出方式：**导出完整数据**（含聊天图片）与**导出时剥离图片附件**（去除聊天图片 base64，文件更小）。
-  - 默认导出到系统下载目录 `Download/`，无需手动选择保存位置。
+- **图片保存**：把生成的角色图一键保存到系统相册目录。
+- **文件下载**：把前端产生的文件写入系统下载目录，带前台进度通知。
+- **沉浸式全屏**：对话与阅读时隐藏系统状态栏。
+- **明文备份**：把全部数据以可读文件导出——角色卡（PNG）、聊天记录（JSONL）、记忆与全局数据（JSON），打包为 zip；导入兼容明文备份与旧版（137 及以前）内部数据备份。
+  - 导出在后台执行，通知栏实时显示进度。
+  - 支持两种方式：**导出完整数据**（含聊天图片）与**导出时剥离图片附件**（文件更小）。
+  - 默认导出到系统下载目录 `Download/`。
+
+---
+
+## 下载与安装
+
+最新版本见 [Releases](../../releases)，下载对应版本的 `RoleplayHub-Beta-<版本号>.apk` 安装即可。
+
+首次使用时，按提示开启「所有文件访问」权限，以启用图片保存、文件下载与数据备份等功能。
 
 ---
 
 ## 构建
 
-需要 JDK 17 与 Android SDK。构建前请先同步前端资源：将根目录的 `index.html`、`assets/`、`character/`、`novel/` 复制到 `android-app/app/src/main/assets/www/`。
+需要 JDK 17 与 Android SDK（API 34）。
+
+1. 同步前端资源：将根目录的 `index.html`、`assets/`、`character/`、`novel/` 复制到 `android-app/app/src/main/assets/www/`。
+2. 构建：
 
 ```bash
-# 同步前端资源
-cp -r index.html assets character novel android-app/app/src/main/assets/www/
-
 cd android-app
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-export ANDROID_HOME=/opt/android-sdk
-export ANDROID_SDK_ROOT=/opt/android-sdk
-gradle assembleRelease -x lintVitalRelease --no-daemon
+export ANDROID_HOME=<你的 Android SDK 路径>
+gradle assembleRelease
 ```
 
-构建产物以版本化文件名输出：`android-app/app/build/outputs/apk/release/RoleplayHub-Beta-<versionName>.apk`（本地、发布目录与 GitHub Release 资产三处同名一致）。
-
-## 发布
-
-发布走 GitHub Actions，无需本地打正式包：
-
-```bash
-# 先推送源码
-git push origin master:main
-# 打 tag 触发构建与发布
-git tag vX.Y.Z
-git push origin vX.Y.Z
-```
-
-推送 `v*` 的 tag 后，`.github/workflows/release.yml` 会自动构建 release 包并创建 GitHub Release、上传 APK。发布完成后可用 `gh release edit vX.Y.Z --title "Roleplay Hub Android Beta-X.Y.Z"` 统一标题，用 `gh release edit vX.Y.Z --latest` 标记最新版本。
+构建产物位于 `android-app/app/build/outputs/apk/release/RoleplayHub-Beta-<版本号>.apk`。
 
 ---
 
