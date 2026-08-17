@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 
@@ -122,6 +123,7 @@ class BackupExportService : Service() {
             }
             uiHandler.post {
                 if (ok) {
+                    Toast.makeText(this, "备份导出完成，已保存到 Download/$fileName", Toast.LENGTH_LONG).show()
                     nm.notify(NOTIFICATION_ID, NotificationCompat.Builder(this, CHANNEL_ID)
                         .setSmallIcon(android.R.drawable.stat_sys_upload_done)
                         .setContentTitle("备份导出完成")
@@ -130,6 +132,7 @@ class BackupExportService : Service() {
                         .setContentIntent(contentIntent())
                         .build())
                 } else {
+                    Toast.makeText(this, "备份导出失败，请重试", Toast.LENGTH_SHORT).show()
                     nm.notify(NOTIFICATION_ID, NotificationCompat.Builder(this, CHANNEL_ID)
                         .setSmallIcon(android.R.drawable.stat_notify_error)
                         .setContentTitle("备份导出失败")

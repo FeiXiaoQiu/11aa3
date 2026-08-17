@@ -9585,10 +9585,17 @@ const app = createApp({
                 messages = Array.isArray(messages) ? cloneForStorage(messages) : [];
                 if (stripImages) {
                     messages = messages.map(message => {
+                        const result = { ...message };
+                        let changed = false;
                         if (Array.isArray(message?.imageAttachments) && message.imageAttachments.length) {
-                            return { ...message, imageAttachments: [] };
+                            result.imageAttachments = [];
+                            changed = true;
                         }
-                        return message;
+                        if (typeof message?.avatar === 'string' && message.avatar.startsWith('data:')) {
+                            result.avatar = '';
+                            changed = true;
+                        }
+                        return changed ? result : message;
                     });
                 }
                 return { branchId: branch.id, messages };
@@ -9715,8 +9722,8 @@ const app = createApp({
         const exportAllPlainBackup = async (stripImages = false) => {
             try {
                 showToast(stripImages
-                    ? '正在导出明文备份（已剥离图片附件）…，进度见通知栏'
-                    : '正在导出明文备份…，进度见通知栏', 'info');
+                    ? '正在导出精简备份（不含图片）…，进度见通知栏'
+                    : '正在导出完整备份…，进度见通知栏', 'info');
                 const native = window.RoleplayHubNative;
                 if (!native || typeof native.beginPlainBackup !== 'function') {
                     showToast('当前环境不支持明文备份', 'error');
