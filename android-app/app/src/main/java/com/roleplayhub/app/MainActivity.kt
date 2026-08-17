@@ -340,10 +340,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startPlainBackupExport() {
+        Toast.makeText(this, "正在准备导出…", Toast.LENGTH_SHORT).show()
         webView.evaluateJavascript(
-            "window.RPHubPlainBackup && window.RPHubPlainBackup.exportAll ? window.RPHubPlainBackup.exportAll() : (function(){})()",
-            null
-        )
+            "window.RPHubPlainBackup && typeof window.RPHubPlainBackup.exportAll === 'function' ? (window.RPHubPlainBackup.exportAll(), 'ok') : 'unavailable'"
+        ) { result ->
+            val value = result?.trim()?.trim('"')
+            if (value == "unavailable") {
+                runOnUiThread {
+                    Toast.makeText(this, "页面尚未就绪，请稍后再试", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     fun beginPlainBackup(fileCount: Int) {

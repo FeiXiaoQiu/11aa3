@@ -9655,11 +9655,17 @@ const app = createApp({
             const files = [];
             const charManifest = [];
             for (let i = 0; i < characters.value.length; i += 1) {
+                await yieldToUi();
                 const char = characters.value[i];
                 const name = plainBackupSanitizeFileName(char.name);
                 try {
                     const v2Data = buildCharacterExportData(char);
-                    const pngBytes = await cardUtils.imageUrlToPngBytes(char.avatar, { crossOrigin: 'Anonymous' });
+                    const avatarSrc = String(char.avatar || '');
+                    const isRemoteAvatar = avatarSrc.startsWith('http://') || avatarSrc.startsWith('https://');
+                    const pngBytes = await cardUtils.imageUrlToPngBytes(
+                        avatarSrc,
+                        isRemoteAvatar ? { crossOrigin: 'Anonymous' } : {}
+                    );
                     const finalPng = cardUtils.injectPngTextChunk(pngBytes, 'chara', cardUtils.encodeBase64Utf8(JSON.stringify(v2Data)));
                     files.push({ path: 'characters/' + name + '_' + i + '.png', base64: bytesToBase64(finalPng) });
                 } catch (pngErr) {
@@ -9697,6 +9703,7 @@ const app = createApp({
 
         const exportAllPlainBackup = async () => {
             try {
+                showToast('正在导出明文备份…', 'info');
                 await saveData({ saveMemories: true, saveCharacters: true });
                 const files = await collectPlainBackupFiles();
                 const native = window.RoleplayHubNative;
@@ -9710,6 +9717,7 @@ const app = createApp({
                 }
                 native.beginPlainBackup(files.length);
                 for (const file of files) {
+                    await yieldToUi();
                     native.beginPlainBackupFile(file.path, file.base64.length);
                     for (let off = 0; off < file.base64.length; off += plainBackupChunkSize) {
                         native.addPlainBackupChunk(file.base64.substring(off, off + plainBackupChunkSize));
@@ -9720,7 +9728,7 @@ const app = createApp({
                 showToast('正在生成明文备份…', 'info');
             } catch (e) {
                 console.error('Plain backup export error:', e);
-                showToast('明文备份导出失败: ' + (e?.message || e), 'error');
+                showToast('明文备份导出失败: ' + (e?.message || e), 'error', 5000);
             }
         };
 

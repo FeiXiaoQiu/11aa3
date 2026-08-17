@@ -20,8 +20,8 @@ android {
         applicationId = "com.roleplayhub.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 138
-        versionName = "Beta-1.3.8"
+        versionCode = 139
+        versionName = "Beta-1.3.9"
     }
 
     signingConfigs {
