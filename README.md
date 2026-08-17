@@ -1,45 +1,97 @@
-# Roleplay Hub
+# Roleplay Hub · Android 套壳版
+
+> **一款纯前端运行的本地角色扮演（Roleplay）对话和角色卡生成工具。**
+> 本仓库在其基础上新增了 **Android 套壳 App**、**在线人数服务** 与 **自动化发布流程**。
+
+**复刻自** [STA1N156/RP-Hub](https://github.com/STA1N156/RP-Hub/)。
 
 [![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
 [![Vue](https://img.shields.io/badge/Vue-3-4FC08D.svg?logo=vue.js)](https://vuejs.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 [![DaisyUI](https://img.shields.io/badge/DaisyUI-5A0EF8?logo=daisyui&logoColor=white)](https://daisyui.com/)
 
-> **一款纯前端运行的本地角色扮演（Roleplay）对话和角色卡生成工具。**
+---
 
-**【免责与授权声明】**  
-本项目基于 **[CC BY-NC 4.0（知识共享-署名-非商业性使用 4.0 国际许可协议）](./LICENSE)** 开源。**明确禁止任何形式的商业化使用（包括但不限于：作为收费服务提供、打包在付费产品中售卖、在产品内植入广告盈利等）。** 任何使用者必须遵守该协议，尊重原作者的署名权。对于违反协议的商业行为，保留追究法律责任的权利。
+## 本仓库新增内容
+
+在原版纯前端应用之上，本仓库额外提供以下能力：
+
+- **Android 套壳 App**（`android-app/`）：将前端资源离线打包进 APK，通过原生桥提供文件下载、图片保存、数据备份与在线更新。
+- **在线人数服务**（`presence-server/`）：无需数据库的匿名在线人数接口，可部署到 Zeabur。
+- **发布流程**：版本号规范、本地构建验证与 GitHub Actions 发布。
 
 ---
 
-## 核心特性 (Features)
+## Android 套壳 App (android-app)
 
-Roleplay Hub 致力于提供流畅、私密且功能强大的本地化AI Roleplay体验。
+`android-app/` 是一个 Kotlin 编写的 Android 套壳工程，将前端资源离线打包进 APK，通过原生桥提供文件下载、图片保存、数据备份与在线更新能力。
 
-- 角色卡、世界书、正则脚本和多用户资料管理
-- 总结记忆与向量记忆，可按角色和剧情分支独立保存
-- 剧情分支创建、切换、回档、重命名和完整导入导出
-- UI 模板变量分析与对话状态展示
-- 自动生图、单张重新生成和多套内置画师风格
-- 角色卡生成、万相广场与“墨韵 · 造梦”在线工具
+### 打包与交付
 
-## 快速开始 (Quick Start)
+前端资源位于 `android-app/app/src/main/assets/www/`，需与根目录 `assets/`、`character/`、`novel/` 及 `index.html` 保持同步。构建前请先同步前端资源并 `diff` 校验一致，再执行构建。
 
-本项目无需复杂的 Node.js 环境或依赖安装，即开即用！
+```bash
+# 同步前端资源到 android-app（由发布流程维护，此处示意）
+# 同步后校验：diff -r assets android-app/app/src/main/assets/www
 
-### 1. 下载与运行
-1. 点击项目主页绿色的 `Code` 按钮，选择 `Download ZIP`。
-2. 将下载的 ZIP 压缩包解压到您的本地任意文件夹中。
-3. 双击打开 `index.html` 文件，即可在浏览器（推荐 Chrome / Edge / Firefox）中启动 Roleplay Hub。
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+export ANDROID_HOME=/opt/android-sdk
+export ANDROID_SDK_ROOT=/opt/android-sdk
+cd android-app
+/opt/gradle-8.7/bin/gradle clean assembleRelease -x lintVitalRelease --no-daemon
+```
 
-*(注：如果您遇到跨域或本地文件读取权限问题，可以尝试使用 VS Code 的 `Live Server` 插件，或简单的本地服务器工具来运行该目录。但在绝大多数现代浏览器中，双击 index.html 即可正常使用所有核心功能。)*
+构建产物输出到 `android-app/app/build/outputs/apk/release/`，交付物按版本号归档到根目录 `release/RoleplayHub-Beta-<versionName>.apk`。
 
-### 2. 初始化设置
-1. 打开应用后，点击侧边栏（或顶部菜单）的**设置 (Settings)** 选项。
-2. 选择自定义配置，填入您自己的或第三方提供的 API 节点 (`API URL`)。
-3. 填入对应的 `API Key`，并输入或选择您想使用的 `模型名称 (Model)`。
-4. 在**角色管理**界面，导入您的角色卡文件（或点击新建角色并手动填写设定）。
-5. 回到对话界面，开始属于您的 Roleplay 旅程
+### 版本号规则
+
+- 采用三段式语义化版本 `Beta-x.y.z`（如 `Beta-1.3.7`）。
+- `versionName=Beta-x.y.z`，`versionCode` 对应纯数字（如 `137`）。
+- 版本递增时按语义化规则逐位递增，禁止跳位（如 `Beta-1.2.10`）。
+
+### 签名
+
+- 密钥库：`android-app/roleplayhub-release.keystore`
+- 签名配置：`android-app/keystore.properties`（`keyAlias=roleplayhub`）
+- `local.properties` 与 `keystore.properties` 含本机敏感路径，已被 `.gitignore` 排除，请勿提交。
+
+### 原生桥说明
+
+| 类 | 职责 |
+|---|---|
+| `MainActivity` | 主界面、悬浮菜单、全屏控制、下载/保存调度 |
+| `RoleplayHubNativeBridge` | JS 原生桥，处理保存图片/文件/全屏等调用 |
+| `WebAssetLoader` | 离线资源加载、assets → files/www 缓存同步、MIME 映射与路径穿越防护 |
+| `DownloadService` | 前台下载服务，自定义进度通知（不使用 `DownloadManager`） |
+| `FileDownloader` | base64 文件落盘，文件名净化 |
+| `ImageSaver` | 图片保存到 `Download/RPHub/` |
+| `BackupManager` | 数据备份导出与恢复 |
+| `UpdateManager` | 前端资源包在线更新 |
+
+---
+
+## 在线人数服务 (presence-server)
+
+`presence-server/` 是一个无需数据库的匿名在线人数接口，基于 Node.js，可一键部署到 Zeabur。
+
+- 浏览器每 20 秒报到一次，60 秒未报到自动离线；同一浏览器多标签页共用一个编号，仅计为 1 人。
+- 不接收或保存角色卡、聊天记录、API 密钥等数据，仅在内存保存随机编号与过期时间。
+
+主要接口：
+
+- `GET /health`：健康检查。
+- `GET /v1/online`：读取当前在线人数。
+- `POST /v1/presence`：匿名心跳，返回在线人数与最新公告 ID。
+
+部署与配置细节见 [`presence-server/README.md`](./presence-server/README.md)。
+
+---
+
+## 发布流程 (Release)
+
+1. 本地同步前端资源并 `diff` 校验一致，执行 `assembleRelease` 构建验证。
+2. 本地验证通过后，推送源码到远程 `main` 分支，触发 GitHub Actions 构建并发布 release。
+3. 交付 APK 归档到 `release/`，删除同目录旧版本。
 
 ---
 
@@ -49,12 +101,10 @@ Roleplay Hub 致力于提供流畅、私密且功能强大的本地化AI Rolepla
 Roleplay-Hub/
 ├── index.html                     # 主界面与脚本加载入口
 ├── character/                     # 角色卡生成工具
-│   └── index.html
 ├── novel/                         # 墨韵 · 造梦
-│   └── index.html
 ├── assets/
-│   ├── css/
-│   │   └── styles.css             # 全局样式
+│   ├── css/styles.css             # 全局样式
+│   ├── vendor/                    # 离线第三方依赖（Vue/Tailwind/DaisyUI 等）
 │   └── js/
 │       ├── built-in-content.js    # 默认预设、模式提示词、画师串与更新公告
 │       ├── core-utils.js          # 通用工具、角色卡处理与基础配置
@@ -62,17 +112,36 @@ Roleplay-Hub/
 │       ├── runtime-services.js    # API 请求、消息渲染与运行状态
 │       ├── ui-components.js       # 选择器、侧边栏、弹窗与页面组件
 │       └── app.js                 # 主业务入口与页面状态
+├── presence-server/               # 在线人数服务（Node.js，可部署到 Zeabur）
+├── android-app/                   # Android 套壳工程（Kotlin）
+│   └── app/src/main/
+│       ├── java/com/roleplayhub/app/
+│       │   ├── MainActivity.kt            # 主界面、菜单、全屏、下载/保存调度
+│       │   ├── RoleplayHubNativeBridge.kt # JS 原生桥（保存图片/文件/全屏）
+│       │   ├── WebAssetLoader.kt          # 离线资源加载与缓存同步
+│       │   ├── DownloadService.kt         # 前台下载服务
+│       │   ├── FileDownloader.kt          # base64 文件落盘
+│       │   ├── ImageSaver.kt              # 图片保存到 Download/RPHub
+│       │   ├── BackupManager.kt           # 数据备份导出/恢复
+│       │   └── UpdateManager.kt           # 资源包在线更新
+│       ├── assets/www/            # 打包进 APK 的前端资源（与根目录同步）
+│       └── res/                   # 图标与主题资源
+├── release/                       # 已构建的 APK 交付物
 └── README.md                      # 项目说明
 ```
 
-### 代码组织说明
+---
 
-页面会按照上方顺序加载 JavaScript 文件，请不要随意调整依赖顺序。
+## 关于上游 (Upstream)
 
-- 修改默认预设、各模式提示词、生图画师串或工具说明时，统一编辑 `built-in-content.js`。
-- 更新公告固定放在 `built-in-content.js` 最底部，方便查找和替换。
-- 可复用界面统一放在 `ui-components.js`，业务数据处理放在 `data-services.js`。
-- 项目没有构建步骤，修改后刷新浏览器即可验证。
+本项目核心前端基于 [STA1N156/RP-Hub](https://github.com/STA1N156/RP-Hub/)。上游是一个纯前端运行的本地 AI 角色扮演工具，支持角色卡、世界书、总结记忆与向量记忆、剧情分支、自动生图、角色卡生成与万相广场等能力。
+
+- 详细功能与使用说明请见 [上游仓库](https://github.com/STA1N156/RP-Hub/)。
+- 本仓库未改动前端核心逻辑，仅新增 Android 套壳、在线人数服务与发布流程，前端改动集中在离线打包所需的依赖本地化与原生桥对接。
+
+### 快速开始
+
+本项目无需复杂的 Node.js 环境或依赖安装，即开即用：下载 ZIP 解压后双击 `index.html` 即可在浏览器中启动，随后在设置中填入 API 节点与 Key，导入角色卡即可开始使用。完整步骤见上游 README。
 
 ---
 
