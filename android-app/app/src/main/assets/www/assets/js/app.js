@@ -9608,6 +9608,49 @@ const app = createApp({
             return { lines, characterName: char.name || '' };
         };
 
+        const buildCharacterMemoriesJson = async (char) => {
+            if (!char?.uuid) return null;
+            const savedBranches = await getScopedStoredValue('branches', char.uuid);
+            const branches = normalizeStoryBranches(char, savedBranches);
+            const memoryBranches = [];
+            for (const branch of branches) {
+                const scopeId = getStoryBranchScopeId(char.uuid, branch.id);
+                const vectorMemories = await getScopedStoredValue('memories', scopeId);
+                const classicMemories = await getScopedStoredValue('classic_memories', scopeId);
+                const vectorArr = Array.isArray(vectorMemories) ? vectorMemories : [];
+                const classicArr = Array.isArray(classicMemories) ? classicMemories : [];
+                if (!vectorArr.length && !classicArr.length) continue;
+                memoryBranches.push({
+                    branchId: branch.id,
+                    branchName: branch.name,
+                    vectorMemories: vectorArr,
+                    classicMemories: classicArr
+                });
+            }
+            if (!memoryBranches.length) return null;
+            return JSON.stringify({ characterName: char.name || '', branches: memoryBranches }, null, 2);
+        };
+
+        const GLOBAL_BACKUP_KEYS = [
+            'settings', 'presets', 'global_regex', 'global_worldinfo', 'worldinfo_settings',
+            'global_ui_templates', 'active_tools', 'user', 'user_profiles', 'active_profile_id',
+            'memory_settings', 'token_usage_history'
+        ];
+
+        const buildGlobalDataFiles = async () => {
+            const files = [];
+            for (const key of GLOBAL_BACKUP_KEYS) {
+                try {
+                    const value = await getStoredValue(key);
+                    if (value === undefined || value === null) continue;
+                    files.push({ path: 'data/' + key + '.json', base64: cardUtils.encodeBase64Utf8(JSON.stringify(value, null, 2)) });
+                } catch (e) {
+                    console.error('Plain backup global data error for', key, e);
+                }
+            }
+            return files;
+        };
+
         const collectPlainBackupFiles = async () => {
             const files = [];
             const charManifest = [];
@@ -9630,8 +9673,18 @@ const app = createApp({
                 } catch (chatErr) {
                     console.error('Plain backup chat error for', char.name, chatErr);
                 }
+                try {
+                    const memoriesJson = await buildCharacterMemoriesJson(char);
+                    if (memoriesJson) {
+                        files.push({ path: 'memories/' + name + '_' + i + '.json', base64: cardUtils.encodeBase64Utf8(memoriesJson) });
+                    }
+                } catch (memoryErr) {
+                    console.error('Plain backup memories error for', char.name, memoryErr);
+                }
                 charManifest.push({ index: i, name: char.name || '', uuid: char.uuid || null });
             }
+            const globalDataFiles = await buildGlobalDataFiles();
+            files.push(...globalDataFiles);
             const manifest = {
                 format: 'rphub-plain-backup',
                 version: 1,
@@ -9644,6 +9697,7 @@ const app = createApp({
 
         const exportAllPlainBackup = async () => {
             try {
+                await saveData({ saveMemories: true, saveCharacters: true });
                 const files = await collectPlainBackupFiles();
                 const native = window.RoleplayHubNative;
                 if (!native || typeof native.beginPlainBackup !== 'function') {
@@ -9815,9 +9869,50 @@ const app = createApp({
                 }
             }
 
+            let importedMemories = 0;
+            const memoryFiles = files.filter(file => (file.path || '').startsWith('memories/'));
+            for (const file of memoryFiles) {
+                try {
+                    const text = cardUtils.decodeBase64Utf8(file.base64);
+                    const data = JSON.parse(text);
+                    const char = nameToChar.get(data.characterName);
+                    if (!char) {
+                        console.warn('找不到对应角色，跳过记忆:', data.characterName);
+                        continue;
+                    }
+                    if (!Array.isArray(data.branches)) continue;
+                    for (const branch of data.branches) {
+                        const scopeId = getStoryBranchScopeId(char.uuid, branch.branchId);
+                        if (Array.isArray(branch.vectorMemories) && branch.vectorMemories.length) {
+                            await setScopedStoredValue('memories', scopeId, branch.vectorMemories, { clone: false });
+                        }
+                        if (Array.isArray(branch.classicMemories) && branch.classicMemories.length) {
+                            await setScopedStoredValue('classic_memories', scopeId, branch.classicMemories, { clone: false });
+                        }
+                    }
+                    importedMemories += 1;
+                } catch (e) {
+                    console.error('Import memories failed:', file.path, e);
+                }
+            }
+
+            let importedGlobals = 0;
+            const dataFiles = files.filter(file => (file.path || '').startsWith('data/'));
+            for (const file of dataFiles) {
+                try {
+                    const key = (file.path || '').replace(/^data\//, '').replace(/\.json$/i, '');
+                    if (!key) continue;
+                    const value = JSON.parse(cardUtils.decodeBase64Utf8(file.base64));
+                    await setStoredValue(key, value, { clone: false });
+                    importedGlobals += 1;
+                } catch (e) {
+                    console.error('Import global data failed:', file.path, e);
+                }
+            }
+
             if (!getMainDb()) await initDB();
             await saveCharactersNow();
-            return '导入完成：' + importedChars + ' 个角色，' + importedMessages + ' 条聊天记录';
+            return '导入完成：' + importedChars + ' 个角色，' + importedMessages + ' 条聊天记录，' + importedMemories + ' 个角色记忆，' + importedGlobals + ' 项全局数据';
         };
 
         const plainBackupImportState = {
