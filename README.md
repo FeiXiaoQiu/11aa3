@@ -1,21 +1,22 @@
 # Roleplay Hub Android
 
-Roleplay Hub（RP-Hub）的 Android 客户端。以原生 WebView 加载打包进 APK 的前端页面，并通过 JavaScript 桥（JSBridge）把网页里的调用转发到 Android 系统能力，让纯前端的 Roleplay Hub 可以在手机上离线运行。
+Roleplay Hub（RP-Hub）的第三方 Android 客户端。
 
-> 前端核心基于 [STA1N156/RP-Hub](https://github.com/STA1N156/RP-Hub/)，本项目在其基础上新增 Android 客户端。
+上游 [STA1N156/RP-Hub](https://github.com/STA1N156/RP-Hub/) 是一个纯前端运行的本地 AI 角色扮演工具。本项目将其打包成 Android 应用：以原生 WebView 加载打包进 APK 的前端页面，并用 JavaScript 桥（JSBridge）补上浏览器里做不到的能力，让它在手机上可以离线运行、并把文件真正写到系统目录。
 
 [![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
 
 ---
 
-## 特性
+## 补充的能力
 
-- **离线运行**：前端资源打包进 APK，无需浏览器、无需联网即可打开。
-- **文件下载**：通过前台通知展示下载进度，文件保存到系统下载目录。
-- **图片保存**：生成的角色图一键保存到相册目录。
-- **数据备份**：角色卡、剧情、配置等数据可导出备份，也可恢复。
-- **在线更新**：前端资源包支持在线更新，无需重新安装 APK。
-- **沉浸式全屏**：对话与阅读场景进入沉浸式全屏。
+纯前端在 WebView 里只能跑页面，以下能力是浏览器默认做不到、由本客户端原生代码补上的：
+
+- **离线运行**：前端资源打包进 APK，无需联网、无需浏览器即可打开。
+- **图片保存**：把生成的角色图一键保存到系统相册目录（WebView 网页无法直接写相册）。
+- **文件下载**：把前端产生的文件写入系统下载目录，带前台进度通知（WebView 默认不提供本地下载）。
+- **沉浸式全屏**：对话与阅读时隐藏系统状态栏（网页无法控制系统 UI）。
+- **数据备份**：把前端本地数据导出为 zip 文件、或从 zip 恢复（网页的 localStorage 无法导出为系统文件）。
 
 ---
 
@@ -34,9 +35,9 @@ cd android-app
 
 ## 关于上游
 
-本项目前端核心基于 [STA1N156/RP-Hub](https://github.com/STA1N156/RP-Hub/)，这是一个纯前端运行的本地 AI 角色扮演工具，支持角色卡、世界书、记忆、剧情分支、自动生图、万相广场等能力，并内置在线人数同步服务（`presence-server/`）。
+本项目前端核心基于 [STA1N156/RP-Hub](https://github.com/STA1N156/RP-Hub/)，未改动其核心逻辑，仅新增 Android 客户端与离线打包所需的原生桥对接。
 
-前端功能与使用说明请见 [上游仓库](https://github.com/STA1N156/RP-Hub/)。本仓库未改动前端核心逻辑，仅新增 Android 客户端与离线打包所需对接。
+前端功能与使用说明（角色卡、世界书、记忆、剧情分支、自动生图、万相广场、在线人数同步等）请见 [上游仓库](https://github.com/STA1N156/RP-Hub/)。
 
 ---
 
