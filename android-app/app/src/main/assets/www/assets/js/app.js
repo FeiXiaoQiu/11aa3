@@ -9900,8 +9900,32 @@ const app = createApp({
             return importedChat.length;
         };
 
+        const clearAllDataForRestore = async () => {
+            if (!getMainDb()) await initDB();
+            const mainKeys = await readStorageKeys(getMainDb());
+            const legacyKeys = getLegacyDb() ? await readStorageKeys(getLegacyDb()) : [];
+            if (mainKeys.length) await deleteStorageKeys(getMainDb(), mainKeys);
+            if (legacyKeys.length) await deleteStorageKeys(getLegacyDb(), legacyKeys);
+        };
+
         const importAllPlainBackupFiles = async (files) => {
             if (!Array.isArray(files) || !files.length) return '备份中没有数据';
+
+            // 恢复采用覆盖语义：先清空本地全部数据，仅保留设备本地的密钥
+            const currentSettings = await getStoredValue('settings');
+            const currentActiveTools = await getStoredValue('active_tools');
+            const keptSecrets = {
+                apiKey: currentSettings?.apiKey,
+                apiProviderKeys: currentSettings?.apiProviderKeys,
+                imageGenKey: currentSettings?.imageGenKey,
+                tavilyByTool: (Array.isArray(currentActiveTools) ? currentActiveTools : [])
+                    .filter(tool => tool && typeof tool === 'object' && tool.tavilyApiKey !== undefined)
+                    .map(tool => ({ id: tool.id, callName: tool.callName, tavilyApiKey: tool.tavilyApiKey }))
+            };
+            await clearAllDataForRestore();
+            characters.value = [];
+            clearCurrentCharacterData();
+
             const charFiles = files.filter(file => (file.path || '').startsWith('characters/'));
             const chatFiles = files.filter(file => (file.path || '').startsWith('chats/'));
             const nameToChar = new Map();
@@ -9984,23 +10008,21 @@ const app = createApp({
                     if (!key) continue;
                     let value = JSON.parse(cardUtils.decodeBase64Utf8(file.base64));
                     if (key === 'settings') {
-                        const current = await getStoredValue('settings');
-                        if (current && typeof current === 'object') {
-                            if (value.apiKey === undefined && current.apiKey !== undefined) value.apiKey = current.apiKey;
-                            if (value.apiProviderKeys === undefined && current.apiProviderKeys !== undefined) value.apiProviderKeys = current.apiProviderKeys;
-                            if (value.imageGenKey === undefined && current.imageGenKey !== undefined) value.imageGenKey = current.imageGenKey;
-                        }
+                        if (value.apiKey === undefined && keptSecrets.apiKey !== undefined) value.apiKey = keptSecrets.apiKey;
+                        if (value.apiProviderKeys === undefined && keptSecrets.apiProviderKeys !== undefined) value.apiProviderKeys = keptSecrets.apiProviderKeys;
+                        if (value.imageGenKey === undefined && keptSecrets.imageGenKey !== undefined) value.imageGenKey = keptSecrets.imageGenKey;
                     } else if (key === 'active_tools') {
-                        const current = await getStoredValue('active_tools');
-                        if (Array.isArray(value) && Array.isArray(current)) {
-                            const byId = new Map(current.filter(tool => tool && tool.id).map(tool => [tool.id, tool]));
-                            const byCallName = new Map(current.filter(tool => tool && tool.callName).map(tool => [tool.callName, tool]));
+                        if (Array.isArray(value)) {
+                            const secretById = new Map();
+                            const secretByName = new Map();
+                            keptSecrets.tavilyByTool.forEach(secret => {
+                                if (secret.id) secretById.set(secret.id, secret.tavilyApiKey);
+                                if (secret.callName) secretByName.set(secret.callName, secret.tavilyApiKey);
+                            });
                             value = value.map(tool => {
                                 if (!tool || typeof tool !== 'object' || tool.tavilyApiKey !== undefined) return tool;
-                                const match = byId.get(tool.id) || byCallName.get(tool.callName);
-                                if (match && match.tavilyApiKey !== undefined) {
-                                    return { ...tool, tavilyApiKey: match.tavilyApiKey };
-                                }
+                                const match = secretById.get(tool.id) ?? secretByName.get(tool.callName);
+                                if (match !== undefined) return { ...tool, tavilyApiKey: match };
                                 return tool;
                             });
                         }
