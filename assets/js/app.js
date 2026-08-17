@@ -9559,6 +9559,14 @@ const app = createApp({
             return cleaned || 'character';
         };
 
+        const sanitizePlainBackupContent = (content) => {
+            if (typeof content !== 'string' || !content) return content;
+            return content.replace(/data-image-request="([^"]*)"/g, (_match, url) => {
+                const cleaned = String(url).replace(/([?&])token=[^&]*/g, '$1');
+                return `data-image-request="${cleaned}"`;
+            });
+        };
+
         const buildCharacterChatJsonl = async (index, stripImages = false) => {
             const char = characters.value[index];
             if (!char) return null;
@@ -9583,10 +9591,17 @@ const app = createApp({
                     messages = await getScopedStoredValue('chat', index);
                 }
                 messages = Array.isArray(messages) ? cloneForStorage(messages) : [];
-                if (stripImages) {
-                    messages = messages.map(message => {
-                        const result = { ...message };
-                        let changed = false;
+                messages = messages.map(message => {
+                    const result = { ...message };
+                    let changed = false;
+                    if (typeof message?.content === 'string' && message.content.includes('data-image-request')) {
+                        const sanitized = sanitizePlainBackupContent(message.content);
+                        if (sanitized !== message.content) {
+                            result.content = sanitized;
+                            changed = true;
+                        }
+                    }
+                    if (stripImages) {
                         if (Array.isArray(message?.imageAttachments) && message.imageAttachments.length) {
                             result.imageAttachments = [];
                             changed = true;
@@ -9595,9 +9610,9 @@ const app = createApp({
                             result.avatar = '';
                             changed = true;
                         }
-                        return changed ? result : message;
-                    });
-                }
+                    }
+                    return changed ? result : message;
+                });
                 return { branchId: branch.id, messages };
             }));
             const totalMessages = branchChats.reduce((sum, branch) => sum + branch.messages.length, 0);
@@ -9657,8 +9672,21 @@ const app = createApp({
             const files = [];
             for (const key of GLOBAL_BACKUP_KEYS) {
                 try {
-                    const value = await getStoredValue(key);
+                    let value = await getStoredValue(key);
                     if (value === undefined || value === null) continue;
+                    if (key === 'settings') {
+                        value = cloneForStorage(value);
+                        delete value.apiKey;
+                        delete value.apiProviderKeys;
+                        delete value.imageGenKey;
+                    } else if (key === 'active_tools') {
+                        value = cloneForStorage(value);
+                        if (Array.isArray(value)) {
+                            value.forEach(tool => {
+                                if (tool && typeof tool === 'object') delete tool.tavilyApiKey;
+                            });
+                        }
+                    }
                     files.push({ path: 'data/' + key + '.json', base64: cardUtils.encodeBase64Utf8(JSON.stringify(value, null, 2)) });
                 } catch (e) {
                     console.error('Plain backup global data error for', key, e);
@@ -9668,44 +9696,59 @@ const app = createApp({
         };
 
         const collectPlainBackupFiles = async (onProgress, stripImages = false) => {
-            const files = [];
-            const charManifest = [];
             const totalSteps = characters.value.length;
-            for (let i = 0; i < characters.value.length; i += 1) {
-                await yieldToUi();
-                const char = characters.value[i];
-                const name = plainBackupSanitizeFileName(char.name);
-                try {
-                    const v2Data = buildCharacterExportData(char);
-                    const avatarSrc = String(char.avatar || '');
-                    const isRemoteAvatar = avatarSrc.startsWith('http://') || avatarSrc.startsWith('https://');
-                    const pngBytes = await cardUtils.imageUrlToPngBytes(
-                        avatarSrc,
-                        isRemoteAvatar ? { crossOrigin: 'Anonymous' } : {}
-                    );
-                    const finalPng = cardUtils.injectPngTextChunk(pngBytes, 'chara', cardUtils.encodeBase64Utf8(JSON.stringify(v2Data)));
-                    files.push({ path: 'characters/' + name + '_' + i + '.png', base64: bytesToBase64(finalPng) });
-                } catch (pngErr) {
-                    console.error('Plain backup PNG error for', char.name, pngErr);
-                }
-                try {
-                    const chat = await buildCharacterChatJsonl(i, stripImages);
-                    if (chat) {
-                        files.push({ path: 'chats/' + name + '_' + i + '.jsonl', base64: cardUtils.encodeBase64Utf8(chat.lines) });
+            const charManifest = new Array(totalSteps);
+            const perCharFiles = new Array(totalSteps);
+            let completed = 0;
+            let cursor = 0;
+            const CONCURRENCY = Math.min(4, totalSteps);
+            const workers = Array.from({ length: CONCURRENCY }, async () => {
+                while (cursor < totalSteps) {
+                    const i = cursor;
+                    cursor += 1;
+                    const char = characters.value[i];
+                    const name = plainBackupSanitizeFileName(char.name);
+                    const localFiles = [];
+                    try {
+                        const v2Data = buildCharacterExportData(char);
+                        const avatarSrc = String(char.avatar || '');
+                        const isRemoteAvatar = avatarSrc.startsWith('http://') || avatarSrc.startsWith('https://');
+                        const pngBytes = await cardUtils.imageUrlToPngBytes(
+                            avatarSrc,
+                            isRemoteAvatar ? { crossOrigin: 'Anonymous' } : {}
+                        );
+                        const finalPng = cardUtils.injectPngTextChunk(pngBytes, 'chara', cardUtils.encodeBase64Utf8(JSON.stringify(v2Data)));
+                        localFiles.push({ path: 'characters/' + name + '_' + i + '.png', base64: bytesToBase64(finalPng) });
+                    } catch (pngErr) {
+                        console.error('Plain backup PNG error for', char.name, pngErr);
                     }
-                } catch (chatErr) {
-                    console.error('Plain backup chat error for', char.name, chatErr);
-                }
-                try {
-                    const memoriesJson = await buildCharacterMemoriesJson(char);
-                    if (memoriesJson) {
-                        files.push({ path: 'memories/' + name + '_' + i + '.json', base64: cardUtils.encodeBase64Utf8(memoriesJson) });
+                    try {
+                        const chat = await buildCharacterChatJsonl(i, stripImages);
+                        if (chat) {
+                            localFiles.push({ path: 'chats/' + name + '_' + i + '.jsonl', base64: cardUtils.encodeBase64Utf8(chat.lines) });
+                        }
+                    } catch (chatErr) {
+                        console.error('Plain backup chat error for', char.name, chatErr);
                     }
-                } catch (memoryErr) {
-                    console.error('Plain backup memories error for', char.name, memoryErr);
+                    try {
+                        const memoriesJson = await buildCharacterMemoriesJson(char);
+                        if (memoriesJson) {
+                            localFiles.push({ path: 'memories/' + name + '_' + i + '.json', base64: cardUtils.encodeBase64Utf8(memoriesJson) });
+                        }
+                    } catch (memoryErr) {
+                        console.error('Plain backup memories error for', char.name, memoryErr);
+                    }
+                    charManifest[i] = { index: i, name: char.name || '', uuid: char.uuid || null };
+                    perCharFiles[i] = localFiles;
+                    completed += 1;
+                    if (onProgress) onProgress(completed, totalSteps, 'collect');
                 }
-                charManifest.push({ index: i, name: char.name || '', uuid: char.uuid || null });
-                if (onProgress) onProgress(i + 1, totalSteps, 'collect');
+            });
+            await Promise.all(workers);
+
+            const files = [];
+            for (let i = 0; i < totalSteps; i += 1) {
+                if (perCharFiles[i]) files.push(...perCharFiles[i]);
             }
             const globalDataFiles = await buildGlobalDataFiles();
             files.push(...globalDataFiles);
@@ -9713,7 +9756,7 @@ const app = createApp({
                 format: 'rphub-plain-backup',
                 version: 1,
                 exportedAt: new Date().toISOString(),
-                characters: charManifest
+                characters: charManifest.filter(Boolean)
             };
             files.push({ path: 'manifest.json', base64: cardUtils.encodeBase64Utf8(JSON.stringify(manifest, null, 2)) });
             return files;
