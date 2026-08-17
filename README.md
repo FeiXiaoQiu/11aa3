@@ -1,7 +1,7 @@
-# Roleplay Hub · Android 套壳版
+# Roleplay Hub · Android 客户端（WebView 封装）
 
 > **一款纯前端运行的本地角色扮演（Roleplay）对话和角色卡生成工具。**
-> 本仓库在其基础上新增了 **Android 套壳 App**、**在线人数服务** 与 **自动化发布流程**。
+> 本仓库在其基础上新增了 **Android 客户端（WebView 封装）**、**在线人数服务** 与 **自动化发布流程**。
 
 **复刻自** [STA1N156/RP-Hub](https://github.com/STA1N156/RP-Hub/)。
 
@@ -16,15 +16,15 @@
 
 在原版纯前端应用之上，本仓库额外提供以下能力：
 
-- **Android 套壳 App**（`android-app/`）：将前端资源离线打包进 APK，通过原生桥提供文件下载、图片保存、数据备份与在线更新。
+- **Android 客户端（WebView 封装）**（`android-app/`）：以原生 WebView 容器加载打包进 APK 的前端页面，通过 JavaScript 桥（JSBridge）提供文件下载、图片保存、数据备份与在线更新。
 - **在线人数服务**（`presence-server/`）：无需数据库的匿名在线人数接口，可部署到 Zeabur。
 - **发布流程**：版本号规范、本地构建验证与 GitHub Actions 发布。
 
 ---
 
-## Android 套壳 App (android-app)
+## Android 客户端（WebView 封装）
 
-`android-app/` 是一个 Kotlin 编写的 Android 套壳工程，将前端资源离线打包进 APK，通过原生桥提供文件下载、图片保存、数据备份与在线更新能力。
+`android-app/` 是一个 Kotlin 编写的 Android 原生工程。它以原生 WebView 作为渲染容器，加载打包进 APK 的前端资源（HTML/CSS/JS），并通过 JavaScript 桥（JSBridge）把网页里的调用转发到 Android 系统能力，实现文件下载、图片保存、数据备份与在线更新。
 
 ### 打包与交付
 
@@ -55,12 +55,12 @@ cd android-app
 - 签名配置：`android-app/keystore.properties`（`keyAlias=roleplayhub`）
 - `local.properties` 与 `keystore.properties` 含本机敏感路径，已被 `.gitignore` 排除，请勿提交。
 
-### 原生桥说明
+### 原生桥（JSBridge）说明
 
 | 类 | 职责 |
 |---|---|
 | `MainActivity` | 主界面、悬浮菜单、全屏控制、下载/保存调度 |
-| `RoleplayHubNativeBridge` | JS 原生桥，处理保存图片/文件/全屏等调用 |
+| `RoleplayHubNativeBridge` | JavaScript 桥（JSBridge），处理保存图片/文件/全屏等调用 |
 | `WebAssetLoader` | 离线资源加载、assets → files/www 缓存同步、MIME 映射与路径穿越防护 |
 | `DownloadService` | 前台下载服务，自定义进度通知（不使用 `DownloadManager`） |
 | `FileDownloader` | base64 文件落盘，文件名净化 |
@@ -113,11 +113,11 @@ Roleplay-Hub/
 │       ├── ui-components.js       # 选择器、侧边栏、弹窗与页面组件
 │       └── app.js                 # 主业务入口与页面状态
 ├── presence-server/               # 在线人数服务（Node.js，可部署到 Zeabur）
-├── android-app/                   # Android 套壳工程（Kotlin）
+├── android-app/                   # Android 客户端（Kotlin，WebView 封装）
 │   └── app/src/main/
 │       ├── java/com/roleplayhub/app/
 │       │   ├── MainActivity.kt            # 主界面、菜单、全屏、下载/保存调度
-│       │   ├── RoleplayHubNativeBridge.kt # JS 原生桥（保存图片/文件/全屏）
+│       │   ├── RoleplayHubNativeBridge.kt # JavaScript 桥（保存图片/文件/全屏）
 │       │   ├── WebAssetLoader.kt          # 离线资源加载与缓存同步
 │       │   ├── DownloadService.kt         # 前台下载服务
 │       │   ├── FileDownloader.kt          # base64 文件落盘
@@ -137,7 +137,7 @@ Roleplay-Hub/
 本项目核心前端基于 [STA1N156/RP-Hub](https://github.com/STA1N156/RP-Hub/)。上游是一个纯前端运行的本地 AI 角色扮演工具，支持角色卡、世界书、总结记忆与向量记忆、剧情分支、自动生图、角色卡生成与万相广场等能力。
 
 - 详细功能与使用说明请见 [上游仓库](https://github.com/STA1N156/RP-Hub/)。
-- 本仓库未改动前端核心逻辑，仅新增 Android 套壳、在线人数服务与发布流程，前端改动集中在离线打包所需的依赖本地化与原生桥对接。
+- 本仓库未改动前端核心逻辑，仅新增 Android 客户端（WebView 封装）、在线人数服务与发布流程，前端改动集中在离线打包所需的依赖本地化与 JavaScript 桥对接。
 
 ### 快速开始
 
