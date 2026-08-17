@@ -45,4 +45,9 @@ class RoleplayHubNativeBridge(private val activity: MainActivity) {
     fun finishPlainBackup() {
         activity.finishPlainBackup()
     }
+
+    @JavascriptInterface
+    fun onBackupProgress(done: Int, total: Int, stage: String) {
+        activity.onBackupProgress(done, total, stage)
+    }
 }

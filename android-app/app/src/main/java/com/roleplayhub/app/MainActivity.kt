@@ -126,8 +126,7 @@ class MainActivity : AppCompatActivity() {
         val files = pendingPlainBackupFiles
         pendingPlainBackupFiles = null
         if (uri == null || files == null) return@registerForActivityResult
-        val ok = PlainBackupManager.writeZip(files, uri, this)
-        Toast.makeText(this, if (ok) getString(R.string.export_success) else getString(R.string.export_failed), Toast.LENGTH_SHORT).show()
+        BackupExportService.writeZip(this, files, uri)
     }
 
     private val restoreBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -341,6 +340,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun startPlainBackupExport() {
         Toast.makeText(this, "正在准备导出…", Toast.LENGTH_SHORT).show()
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            notifyPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        BackupExportService.startExport(this)
         webView.evaluateJavascript(
             "window.RPHubPlainBackup && typeof window.RPHubPlainBackup.exportAll === 'function' ? (window.RPHubPlainBackup.exportAll(), 'ok') : 'unavailable'"
         ) { result ->
@@ -351,6 +356,10 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    fun onBackupProgress(done: Int, total: Int, stage: String) {
+        BackupExportService.updateProgress(applicationContext, done, total, stage)
     }
 
     fun beginPlainBackup(fileCount: Int) {

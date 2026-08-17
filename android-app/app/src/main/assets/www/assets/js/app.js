@@ -9651,9 +9651,10 @@ const app = createApp({
             return files;
         };
 
-        const collectPlainBackupFiles = async () => {
+        const collectPlainBackupFiles = async (onProgress) => {
             const files = [];
             const charManifest = [];
+            const totalSteps = characters.value.length;
             for (let i = 0; i < characters.value.length; i += 1) {
                 await yieldToUi();
                 const char = characters.value[i];
@@ -9688,6 +9689,7 @@ const app = createApp({
                     console.error('Plain backup memories error for', char.name, memoryErr);
                 }
                 charManifest.push({ index: i, name: char.name || '', uuid: char.uuid || null });
+                if (onProgress) onProgress(i + 1, totalSteps, 'collect');
             }
             const globalDataFiles = await buildGlobalDataFiles();
             files.push(...globalDataFiles);
@@ -9703,26 +9705,35 @@ const app = createApp({
 
         const exportAllPlainBackup = async () => {
             try {
-                showToast('正在导出明文备份…', 'info');
-                await saveData({ saveMemories: true, saveCharacters: true });
-                const files = await collectPlainBackupFiles();
+                showToast('正在导出明文备份…，进度见通知栏', 'info');
                 const native = window.RoleplayHubNative;
                 if (!native || typeof native.beginPlainBackup !== 'function') {
                     showToast('当前环境不支持明文备份', 'error');
                     return;
                 }
+                const safeProgress = (done, total, stage) => {
+                    try {
+                        if (native && typeof native.onBackupProgress === 'function') {
+                            native.onBackupProgress(done, total, stage);
+                        }
+                    } catch (_) { /* 原生不可用时静默 */ }
+                };
+                await saveData({ saveMemories: true, saveCharacters: true });
+                const files = await collectPlainBackupFiles(safeProgress);
                 if (!files.length) {
                     showToast('没有可导出的数据', 'warning');
                     return;
                 }
                 native.beginPlainBackup(files.length);
-                for (const file of files) {
+                for (let i = 0; i < files.length; i += 1) {
                     await yieldToUi();
+                    const file = files[i];
                     native.beginPlainBackupFile(file.path, file.base64.length);
                     for (let off = 0; off < file.base64.length; off += plainBackupChunkSize) {
                         native.addPlainBackupChunk(file.base64.substring(off, off + plainBackupChunkSize));
                     }
                     native.endPlainBackupFile();
+                    safeProgress(i + 1, files.length, 'transfer');
                 }
                 native.finishPlainBackup();
                 showToast('正在生成明文备份…', 'info');
