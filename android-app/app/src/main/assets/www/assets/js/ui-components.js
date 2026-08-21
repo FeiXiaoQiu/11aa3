@@ -619,135 +619,6 @@
             </div>`
     };
 
-    const UpdateNotificationModal = {
-        props: {
-            update: { type: Object, required: true },
-            renderMarkdown: { type: Function, required: true }
-        },
-        setup(props, { expose }) {
-            const show = ref(false);
-            const countdown = ref(0);
-            const scrolledToBottom = ref(false);
-            const contentEl = ref(null);
-            const remoteUpdateId = ref(null);
-            const pendingRemoteUpdateId = ref(null);
-            let countdownTimer = null;
-            let countdownEndsAt = 0;
-            let layoutTimer = null;
-
-            const clearTimers = () => {
-                clearInterval(countdownTimer);
-                clearTimeout(layoutTimer);
-                countdownTimer = null;
-                layoutTimer = null;
-            };
-            const startCountdown = () => {
-                clearInterval(countdownTimer);
-                countdownEndsAt = Date.now() + 10_000;
-                const updateCountdown = () => {
-                    countdown.value = Math.max(0, Math.ceil((countdownEndsAt - Date.now()) / 1000));
-                    if (countdown.value > 0) return;
-                    clearInterval(countdownTimer);
-                    countdownTimer = null;
-                };
-                updateCountdown();
-                countdownTimer = setInterval(updateCountdown, 250);
-            };
-            const showRemoteUpdate = (versionId) => {
-                clearTimers();
-                remoteUpdateId.value = versionId;
-                pendingRemoteUpdateId.value = null;
-                countdown.value = 0;
-                scrolledToBottom.value = true;
-                show.value = true;
-            };
-            const handleRemoteUpdate = (event) => {
-                const versionId = Number(event?.detail?.versionId);
-                if (!Number.isInteger(versionId) || versionId < 10000 || versionId > 99999
-                    || versionId <= Number(props.update.id)) return;
-                if (remoteUpdateId.value !== null) {
-                    remoteUpdateId.value = Math.max(remoteUpdateId.value, versionId);
-                } else if (show.value) {
-                    pendingRemoteUpdateId.value = Math.max(pendingRemoteUpdateId.value || 0, versionId);
-                } else {
-                    showRemoteUpdate(versionId);
-                }
-            };
-            const check = () => {
-                if (remoteUpdateId.value !== null || pendingRemoteUpdateId.value !== null) return;
-                const lastId = Number.parseInt(localStorage.getItem('roleplay_hub_update_id'), 10);
-                if (Number.isFinite(lastId) && lastId >= props.update.id) return;
-
-                show.value = true;
-                scrolledToBottom.value = false;
-                startCountdown();
-                layoutTimer = setTimeout(() => {
-                    const element = contentEl.value;
-                    if (element && element.scrollHeight <= element.clientHeight + 10) {
-                        scrolledToBottom.value = true;
-                    }
-                }, 100);
-            };
-            const close = () => {
-                if (remoteUpdateId.value !== null) {
-                    window.location.reload();
-                    return;
-                }
-                if (countdown.value > 0) return;
-                show.value = false;
-                clearTimers();
-                localStorage.setItem('roleplay_hub_update_id', String(props.update.id));
-                if (pendingRemoteUpdateId.value !== null) {
-                    const versionId = pendingRemoteUpdateId.value;
-                    layoutTimer = setTimeout(() => showRemoteUpdate(versionId), 150);
-                }
-            };
-            const handleScroll = (event) => {
-                const element = event.target;
-                scrolledToBottom.value = element.scrollHeight - element.scrollTop - element.clientHeight < 10;
-            };
-
-            window.addEventListener('rphub:update-available', handleRemoteUpdate);
-            expose({ check });
-            onBeforeUnmount(() => {
-                clearTimers();
-                window.removeEventListener('rphub:update-available', handleRemoteUpdate);
-            });
-            return { contentEl, countdown, handleScroll, close, remoteUpdateId, scrolledToBottom, show };
-        },
-        template: `
-            <modal-shell v-if="show" overlay-class="z-[80] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
-                panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-lg flex flex-col shadow-2xl transform transition-all scale-100 overflow-hidden relative">
-                    <div class="bg-gradient-to-r from-primary-50 to-purple-50 p-4 border-b border-gray-100">
-                        <div class="flex items-center gap-3">
-                            <h3 class="text-xl font-bold text-gray-900">{{ remoteUpdateId ? '发现新版本' : update.title }}</h3>
-                            <span class="bg-primary-100 text-primary-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-primary-200 transform translate-y-0.5">New</span>
-                        </div>
-                    </div>
-                    <div ref="contentEl" class="p-4 max-h-[75vh] overflow-y-auto custom-scrollbar update-content" @scroll="handleScroll">
-                        <div v-if="remoteUpdateId" class="py-6 text-center">
-                            <p class="text-lg font-bold text-gray-800">发现新版本，请刷新页面更新</p>
-                        </div>
-                        <div v-else class="prose prose-sm prose-gray max-w-none">
-                            <div class="markdown-body" v-html="renderMarkdown(update.content, 'assistant', true)"></div>
-                        </div>
-                        <div class="mt-8 mb-2 flex justify-end">
-                            <button @click="close" :disabled="!remoteUpdateId && countdown > 0"
-                                :class="{ 'opacity-50 cursor-not-allowed': !remoteUpdateId && countdown > 0 }"
-                                class="px-10 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg shadow-sm hover:shadow transition-all active:scale-95">
-                                {{ remoteUpdateId ? '立即刷新' : '知道了' }} <span v-if="!remoteUpdateId && countdown > 0">({{ countdown }}s)</span>
-                            </button>
-                        </div>
-                    </div>
-                    <div v-show="!remoteUpdateId && !scrolledToBottom" class="absolute bottom-0 left-0 right-0 pt-12 pb-4 bg-gradient-to-t from-white via-white/80 to-transparent flex justify-center items-end pointer-events-none transition-opacity duration-300 rounded-b-xl">
-                        <div class="text-xs text-blue-500 flex items-center gap-1 animate-bounce bg-white shadow-sm border border-blue-100 px-3 py-1.5 rounded-full">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
-                            向下滑动查看完整内容
-                        </div>
-                    </div>
-            </modal-shell>`
-    };
-
     const StatusNoticeModal = {
         props: {
             show: Boolean,
@@ -1034,7 +905,7 @@
                             </div>
                             <ul class="list-disc list-outside ml-9 space-y-1.5 text-sm text-yellow-700">
                                 <li>您可以在 “世界书 -> 自动生图” 手动管理此功能。</li>
-                                <li>前往 “设置” 可以切换生图风格与比例。</li>
+                                <li>前往 “设置” 可以切换生图版本、风格与比例。</li>
                             </ul>
                         </div>
                     </div>
@@ -1197,10 +1068,15 @@
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                             </button>
                         </div>
-                        <div class="flex p-1 bg-gray-200/50 rounded-xl overflow-x-auto no-scrollbar gap-1">
+                        <div class="segmented-switch segmented-switch--compact segmented-switch--four w-full">
+                            <div class="segmented-switch__indicator" :class="{
+                                'is-position-2': tab === 'description',
+                                'is-position-3': tab === 'personality',
+                                'is-position-4': tab === 'first_mes'
+                            }"></div>
                             <button v-for="item in tabs" :key="item.value" @click="$emit('update:tab', item.value)"
-                                :class="['flex-1 px-4 py-2 text-sm font-bold transition-all rounded-lg whitespace-nowrap', tab === item.value ? 'bg-white text-primary-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50']">
-                                {{ item.label }}
+                                class="segmented-switch__option" :class="{ 'is-active': tab === item.value }">
+                                <span>{{ item.label }}</span>
                             </button>
                         </div>
                     </div>
@@ -1972,7 +1848,7 @@
                             汇总当前类型和时间筛选范围内，输入 Token（包括缓存读取）与输出 Token 的总和。
                         </settings-help>
                     </div>
-                    <span class="flex-none whitespace-nowrap font-mono text-xl font-bold tracking-tight text-gray-800">{{ formatAggregate(stats.inputTokens + stats.cacheReadTokens + stats.outputTokens, stats.inputTokensReports + stats.cacheReadTokensReports + stats.outputTokensReports) }}</span>
+                    <span class="flex-none whitespace-nowrap text-xl font-semibold tabular-nums text-gray-800" style="font-family: 'Segoe UI Variable', 'Segoe UI', Arial, sans-serif">{{ formatAggregate(stats.inputTokens + stats.cacheReadTokens + stats.outputTokens, stats.inputTokensReports + stats.cacheReadTokensReports + stats.outputTokensReports) }}</span>
                 </div>
 
                 <div class="flex items-center justify-between mb-3">
@@ -2558,7 +2434,6 @@
         TokenUsageView,
         UiTemplatesView,
         UiTemplateEditorModal,
-        UpdateNotificationModal,
         UserSetupModal,
         UiTemplatePending,
         WorldInfoEditorModal

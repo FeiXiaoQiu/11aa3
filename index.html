@@ -5,18 +5,16 @@
     <meta charset="UTF-8">
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <meta name="rphub-update-api" content="https://rphub-presence.zeabur.app">
+    <meta name="rphub-presence-api" content="https://rphub-presence.zeabur.app">
     <title>RP Hub</title>
     <!-- GitHub Pages rebuild marker for CSS-only animation update. -->
     <!-- <link rel="icon" href="logo.jpg" type="image/jpeg"> -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <link rel="stylesheet" href="assets/vendor/fonts/lora.css">
+    <script src="assets/vendor/tailwind.js"></script>
+    <script src="assets/vendor/vue.global.prod.js"></script>
+    <script src="assets/vendor/marked.min.js"></script>
+    <script src="assets/vendor/purify.min.js"></script>
+    <script src="assets/vendor/sortable.min.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -1154,7 +1152,7 @@
             <!-- Novel View -->
             <div v-if="currentView === 'novel'" class="h-full overflow-hidden flex flex-col bg-gray-50 relative">
                 <embedded-view-content :src="novelUrl" :loading="isNovelLoading"
-                    loading-text="加载小说生成中..." @menu="toggleMobileMenu" @load="onNovelLoad">
+                    loading-text="加载墨韵·造梦中..." @menu="toggleMobileMenu" @load="onNovelLoad">
                 </embedded-view-content>
             </div>
 
@@ -2716,9 +2714,6 @@
             :message="`当前没有遗漏的${memorySettings.mode === 'classic' ? '总结模式记忆' : '记忆分片'}`"
             @close="showNoMemoryNeededModal = false"></status-notice-modal>
 
-        <update-notification-modal ref="updateModalRef" :update="latestUpdateConfig"
-            :render-markdown="renderMarkdown"></update-notification-modal>
-
         <user-setup-modal :show="showUserSetupModal" :name="tempUserSetup.name"
             :description="tempUserSetup.description" :person="tempUserSetup.person"
             @update:name="tempUserSetup.name = $event"
@@ -2813,7 +2808,7 @@
         document.write('<script src="assets/js/core-utils.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/data-services.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/runtime-services.js?v=' + new Date().getTime() + '"><\/script>');
-        document.write('<script src="assets/js/update-check.js?v=' + new Date().getTime() + '"><\/script>');
+        document.write('<script src="assets/js/presence.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/ui-components.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/app.js?v=' + new Date().getTime() + '"><\/script>');
     </script>

@@ -30,7 +30,6 @@ const {
     UiTemplatesView,
     UiTemplateEditorModal,
     UiTemplatePending,
-    UpdateNotificationModal,
     UserSetupModal,
     WorldInfoEditorModal
 } = window.RPHubComponents;
@@ -144,7 +143,6 @@ const {
     defaultApiConfig: DEFAULT_API_CONFIG,
     defaultApiProviderId: DEFAULT_API_PROVIDER_ID,
     imageGenBaseUrl: IMAGE_GEN_BASE_URL,
-    latestUpdate: latestUpdateConfig,
     systemRegexNames,
     systemWorldInfoNames,
     uiOptions
@@ -189,7 +187,6 @@ const app = createApp({
         TokenUsageView,
         UiTemplatesView,
         UiTemplateEditorModal,
-        UpdateNotificationModal,
         UiTemplatePending,
         UserSetupModal,
         WorldInfoEditorModal
@@ -237,8 +234,6 @@ const app = createApp({
             onConfirm: null,
             onCancel: null
         });
-        const updateModalRef = ref(null);
-
         const showVueConfirmModal = (title, message) => {
             return new Promise((resolve) => {
                 globalConfirmModal.value = {
@@ -384,9 +379,7 @@ const app = createApp({
                 scrollRevealObserver = new IntersectionObserver((entries) => {
                     entries.forEach(entry => {
                         if (entry.isIntersecting) {
-                            entry.target.dataset.revealed = 'true';
                             entry.target.classList.add('reveal-active');
-                            scrollRevealObserver.unobserve(entry.target);
                         }
                     });
                 }, {
@@ -401,7 +394,7 @@ const app = createApp({
             if (!scrollRevealObserver) initScrollReveal();
             if (scrollRevealObserver && newEls) {
                 newEls.forEach(el => {
-                    if (el instanceof HTMLElement && el.dataset.revealed !== 'true' && !el.classList.contains('reveal-active')) {
+                    if (el instanceof HTMLElement && !el.classList.contains('reveal-active')) {
                         scrollRevealObserver.observe(el);
                     }
                 });
@@ -1499,8 +1492,39 @@ const app = createApp({
             });
         };
 
+        // --- Back navigation（逐级返回）---
+        // 用显式视图栈记录导航，App 返回键经 window.RPHubBack() 触发回退；
+        // 不依赖 history/goBack，避免 iframe（在线分区）内部导航污染返回栈。
+        let applyingHistoryView = false;
+        const viewStack = [currentView.value];
+
+        window.RPHubBack = function () {
+            if (viewStack.length > 1) {
+                viewStack.pop();
+                const prev = viewStack[viewStack.length - 1];
+                applyingHistoryView = true;
+                currentView.value = prev;
+                applyingHistoryView = false;
+                return true;
+            }
+            // 兜底：视图栈异常到底、但当前不在根视图（聊天页）时，强制回聊天页，
+            // 避免"按一下返回就直接退回桌面"。
+            if (currentView.value !== 'chat') {
+                applyingHistoryView = true;
+                currentView.value = 'chat';
+                applyingHistoryView = false;
+                return true;
+            }
+            return false;
+        };
+
         // Watch view change to refresh embedded pages and sortable lists
         watch(currentView, (newView) => {
+            if (!applyingHistoryView) {
+                if (viewStack[viewStack.length - 1] !== newView) {
+                    viewStack.push(newView);
+                }
+            }
             settingsHelpTopic.value = '';
             if (newView === 'characters') {
                 hasOpenedCharacterManager.value = true;
@@ -2170,6 +2194,28 @@ const app = createApp({
             finishLoading();
         };
 
+        const handleGeneratedImageSave = (event, messageIndex) => {
+            const button = event.target.closest('.generated-image-save');
+            if (!button) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const card = button.closest('.generated-image-card');
+            if (!card || card.classList.contains('is-generating')) return;
+            const imageUrl = card.querySelector('img')?.getAttribute('src');
+            if (!imageUrl) return;
+            const native = window.RoleplayHubNative;
+            if (!native || typeof native.saveImage !== 'function') {
+                showToast('当前环境不支持保存图片', 'warning');
+                return;
+            }
+            try {
+                native.saveImage(imageUrl);
+                showToast('正在保存图片到相册...', 'info');
+            } catch (error) {
+                showToast('保存失败：' + (error.message || '未知错误'), 'error');
+            }
+        };
+
         const updateImageGenRegexState = ({ enableRegex = false } = {}) => {
             const imageGenRegexName = 'NAI画图正则';
             let regex = regexScripts.value.find(r => r.name === imageGenRegexName);
@@ -2182,16 +2228,14 @@ const app = createApp({
             const targetArtists = cardUtils.getImageStyleArtists(settings.imageStyle, settings.customImageArtists);
             const styleName = imageStyleOptions.find(option => option.value === settings.imageStyle)?.label
                 || imageStyleOptions[0].label;
-            const modelName = getImageModelName(settings.imageModel);
 
-            // 动态替换 URL 中的 model、artist 和 size 参数
+            // 动态替换 URL 中的 artist 和 size 参数
             const encodedTargetArtists = encodeURIComponent(targetArtists);
             const oldReplacement = regex.replacement;
             let newReplacement = oldReplacement.replace(/artist=[\s\S]*?(&size=)/, 'artist=' + encodedTargetArtists + '$1');
             if (newReplacement === oldReplacement) {
                 newReplacement = oldReplacement.replace(/artist=[^&]+/, 'artist=' + encodedTargetArtists);
             }
-            newReplacement = newReplacement.replace(/model=[^&]+/, 'model=' + settings.imageModel);
             newReplacement = newReplacement.replace(/size=[^&]+/, 'size=' + settings.imageSize);
             regex.replacement = newReplacement;
 
@@ -2200,10 +2244,6 @@ const app = createApp({
             const oldArtist = oldReplacement.match(/artist=([\s\S]*?)&size=/)?.[1] || oldReplacement.match(/artist=([^&]+)/)?.[1];
             if (oldArtist !== encodedTargetArtists) {
                 messages.push(styleName);
-            }
-            const oldModel = oldReplacement.match(/model=([^&]+)/)?.[1];
-            if (oldModel !== settings.imageModel) {
-                messages.push(modelName);
             }
             // 检查 Size 变化
             const oldSize = oldReplacement.match(/size=([^&]+)/)?.[1];
@@ -2245,16 +2285,6 @@ const app = createApp({
                 updateImageGenRegexState({ enableRegex: isAutoImageGenEnabled.value });
             }
         });
-
-        watch(() => settings.imageModel, (imageModel) => {
-            if (imageModel === 'nai-diffusion-5-full' && v5UnsupportedImageStyles.has(settings.imageStyle)) {
-                settings.imageStyle = 'vertical';
-            }
-            const messages = updateImageGenRegexState({ enableRegex: isAutoImageGenEnabled.value });
-            if (isAutoImageGenEnabled.value && messages && messages.length > 0) {
-                showToast(`生图版本已切换：${getImageModelName(imageModel)}`, 'success');
-            }
-        }, { flush: 'sync' });
 
         watch(() => settings.imageSize, () => {
             const messages = updateImageGenRegexState({ enableRegex: isAutoImageGenEnabled.value });
@@ -3725,6 +3755,20 @@ const app = createApp({
         };
 
         const toggleChatFullscreen = async () => {
+            const native = window.RoleplayHubNative;
+            if (native && typeof native.setFullscreen === 'function') {
+                const next = !isChatFullscreen.value;
+                isChatFullscreen.value = next;
+                if (next) closeMobileMenu();
+                native.setFullscreen(next);
+                setTimeout(() => {
+                    if (typeof syncMobileVisualViewport === 'function') {
+                        syncMobileVisualViewport({ force: true });
+                    }
+                    window.dispatchEvent(new Event('resize'));
+                }, 300);
+                return;
+            }
             try {
                 if (getNativeFullscreenElement()) {
                     isChatFullscreen.value = false;
@@ -3807,6 +3851,7 @@ const app = createApp({
                     showToast('消息已保存', 'success');
                     return;
                 }
+
                 abortConversationBackgroundWork();
                 const snapshot = await ensureConversationMessageIds();
                 const affectedTurn = snapshot.turns.find(turnInfo =>
@@ -5357,96 +5402,58 @@ const app = createApp({
             return groups;
         };
 
-        const compressEligibleClassicMemories = async (totalTurns, signal, interactive = false) => {
+        const compressEligibleClassicMemories = async (totalTurns, signal) => {
             const groups = getEligibleClassicSecondaryGroups(totalTurns);
             if (!groups.length) return 0;
             const characterId = currentCharacter.value?.uuid;
             const storyScopeId = getCurrentStoryBranchScopeId();
             const epoch = _classicExtractionEpoch;
-            const concurrency = normalizeClassicMemoryConcurrency(memorySettings.classicConcurrency);
             let completed = 0;
             let memorySourceForSave = null;
             classicBatchExtractProgress.value = { current: 0, total: groups.length };
             try {
-                for (let offset = 0; offset < groups.length; offset += concurrency) {
+                for (const group of groups) {
                     if (signal?.aborted || epoch !== _classicExtractionEpoch
                         || currentCharacter.value?.uuid !== characterId
                         || getCurrentStoryBranchScopeId() !== storyScopeId) break;
-                    const results = await Promise.all(groups.slice(offset, offset + concurrency).map(async group => {
-                        try {
-                            return { group, summary: await requestClassicSecondarySummary(group, signal) };
-                        } catch (error) {
-                            return { group, error };
-                        } finally {
-                            classicBatchExtractProgress.value.current++;
-                        }
-                    }));
-                    if (signal?.aborted || epoch !== _classicExtractionEpoch
-                        || currentCharacter.value?.uuid !== characterId
-                        || getCurrentStoryBranchScopeId() !== storyScopeId) break;
-                    let failed = false;
-                    for (let result of results) {
-                        if (result.error) {
-                            if (result.error.name === 'AbortError') throw result.error;
-                            if (interactive) {
-                                let retryError = result.error;
-                                const range = `${result.group[0].turn}-${result.group[result.group.length - 1].turn}`;
-                                while (true) {
-                                    const retry = await showVueConfirmModal(
-                                        '总结模式补录遇到错误',
-                                        `第 ${range} 轮二次压缩失败：\n${retryError.message}\n\n是否立即重试？`
-                                    );
-                                    if (!retry) {
-                                        const abortError = new Error('用户取消了重试并中止了二次压缩');
-                                        abortError.name = 'AbortError';
-                                        throw abortError;
-                                    }
-                                    try {
-                                        result = {
-                                            group: result.group,
-                                            summary: await requestClassicSecondarySummary(result.group, signal)
-                                        };
-                                        break;
-                                    } catch (error) {
-                                        if (error.name === 'AbortError') throw error;
-                                        retryError = error;
-                                    }
-                                }
-                            } else {
-                                console.warn('Classic memory secondary compression failed:', result.error);
-                                failed = true;
-                                continue;
-                            }
-                        }
-                        const { group, summary } = result;
-                        const sourceIds = new Set(group.map(memory => memory.id));
-                        if (!group.every(memory => classicMemories.value.some(item => item.id === memory.id))) continue;
-                        const startTurn = Number(group[0].turn);
-                        const endTurn = Number(group[group.length - 1].turn);
-                        const sourceMemories = group.map(memory => cloneForStorage(memory));
-                        const mergedMemory = markRuntimeRaw({
-                            id: generateUUID(),
-                            timestamp: Date.now(),
-                            turn: endTurn,
-                            turnStart: startTurn,
-                            turnEnd: endTurn,
-                            summary,
-                            enabled: true,
-                            classicMemory: true,
-                            secondaryCompressed: true,
-                            summaryModel: String(memorySettings.classicModel || '').trim(),
-                            sourceUserIds: [...new Set(group.flatMap(memory => memory.sourceUserIds || []))],
-                            sourceAssistantIds: [...new Set(group.flatMap(memory => memory.sourceAssistantIds || []))],
-                            sourceMemories
-                        });
-                        classicMemories.value = [
-                            ...classicMemories.value.filter(memory => !sourceIds.has(memory.id)),
-                            mergedMemory
-                        ];
-                        memorySourceForSave = classicMemories.value;
-                        completed++;
+                    let summary;
+                    try {
+                        summary = await requestClassicSecondarySummary(group, signal);
+                    } catch (error) {
+                        if (error?.name === 'AbortError') throw error;
+                        console.warn('Classic memory secondary compression failed:', error);
+                        break;
                     }
-                    if (failed) break;
+                    if (signal?.aborted || epoch !== _classicExtractionEpoch
+                        || currentCharacter.value?.uuid !== characterId
+                        || getCurrentStoryBranchScopeId() !== storyScopeId) break;
+                    const sourceIds = new Set(group.map(memory => memory.id));
+                    if (!group.every(memory => classicMemories.value.some(item => item.id === memory.id))) break;
+                    const startTurn = Number(group[0].turn);
+                    const endTurn = Number(group[group.length - 1].turn);
+                    const sourceMemories = group.map(memory => cloneForStorage(memory));
+                    const mergedMemory = markRuntimeRaw({
+                        id: generateUUID(),
+                        timestamp: Date.now(),
+                        turn: endTurn,
+                        turnStart: startTurn,
+                        turnEnd: endTurn,
+                        summary,
+                        enabled: true,
+                        classicMemory: true,
+                        secondaryCompressed: true,
+                        summaryModel: String(memorySettings.classicModel || '').trim(),
+                        sourceUserIds: [...new Set(group.flatMap(memory => memory.sourceUserIds || []))],
+                        sourceAssistantIds: [...new Set(group.flatMap(memory => memory.sourceAssistantIds || []))],
+                        sourceMemories
+                    });
+                    classicMemories.value = [
+                        ...classicMemories.value.filter(memory => !sourceIds.has(memory.id)),
+                        mergedMemory
+                    ];
+                    memorySourceForSave = classicMemories.value;
+                    completed++;
+                    classicBatchExtractProgress.value.current++;
                 }
             } finally {
                 if (completed > 0) await saveClassicMemoriesNow(storyScopeId, memorySourceForSave);
@@ -7576,8 +7583,7 @@ const app = createApp({
                         foundJobs = true;
                         secondaryCompressedCount += await compressEligibleClassicMemories(
                             currentTurnCount,
-                            batchController.signal,
-                            manual
+                            batchController.signal
                         );
                     }
                     if (_classicBatchExtractAbort !== batchController || batchController.signal.aborted) break;
@@ -8034,11 +8040,11 @@ const app = createApp({
             const targetArtists = cardUtils.getImageStyleArtists(settings.imageStyle, settings.customImageArtists);
 
             const encodedTargetArtists = encodeURIComponent(targetArtists);
-            const imageRequestUrl = `${baseUrl}/generate?tag=$1&token=${encodeURIComponent(imageGenToken)}&model=${settings.imageModel}&artist=${encodedTargetArtists}&size=${settings.imageSize}&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers}},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras`;
+            const imageRequestUrl = `${baseUrl}/generate?tag=$1&token=${encodeURIComponent(imageGenToken)}&model=nai-diffusion-4-5-full&artist=${encodedTargetArtists}&size=${settings.imageSize}&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers}},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras`;
             const imageGenRegexContent = {
                 name: imageGenRegexName,
                 regex: '/image###([\\s\\S]*?)###/g',
-            replacement: `<div class="generated-image-card is-generating" data-image-request="${imageRequestUrl}" style="width:100%;height:auto;max-width:100%;box-sizing:border-box;padding:2px;border:1px solid rgba(255,255,255,.58);background:transparent;position:relative;border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 14px rgba(148,163,184,.06)"><img alt="" style="max-width:100%;height:100%;width:100%;display:block;object-fit:contain;border-radius:9px;transition:transform .3s ease"><div class="generated-image-progress" aria-live="polite"><svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span></div><button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button></div>`,
+            replacement: `<div class="generated-image-card is-generating" data-image-request="${imageRequestUrl}" style="width:100%;height:auto;max-width:100%;box-sizing:border-box;padding:2px;border:1px solid rgba(255,255,255,.58);background:transparent;position:relative;border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 14px rgba(148,163,184,.06)"><img alt="" style="max-width:100%;height:100%;width:100%;display:block;object-fit:contain;border-radius:9px;transition:transform .3s ease"><div class="generated-image-progress" aria-live="polite"><svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span></div><button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button><button type="button" class="generated-image-save" title="保存图片" aria-label="保存图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg></button></div>`,
                 placement: [2],
                 markdownOnly: true,
                 promptOnly: false,
@@ -8059,7 +8065,7 @@ const app = createApp({
 
             // 2. 自动生图世界书
             const autoImageGenWIName = '自动生图';
-            const imageGenCount = Math.min(8, Math.max(1, Number(settings.imageGenCount) || 2));
+            const imageGenCount = Math.min(6, Math.max(1, Number(settings.imageGenCount) || 2));
             const autoImageGenWIContent = {
                 comment: autoImageGenWIName,
                 keys: [],
@@ -8299,46 +8305,55 @@ const app = createApp({
                 showToast('请选择需要删除的分支，主线不能删除', 'warning');
                 return;
             }
-            const parentId = storyBranches.value.some(branch => branch.id === target.parentId)
-                ? target.parentId
-                : STORY_BRANCH_MAIN_ID;
-            const parent = storyBranches.value.find(branch => branch.id === parentId);
-            const hasChildren = storyBranches.value.some(branch => branch.parentId === target.id);
+            const childrenByParent = new Map();
+            storyBranches.value.forEach(branch => {
+                if (!childrenByParent.has(branch.parentId)) childrenByParent.set(branch.parentId, []);
+                childrenByParent.get(branch.parentId).push(branch.id);
+            });
+            const deleteIds = new Set();
+            const stack = [target.id];
+            while (stack.length > 0) {
+                const branchId = stack.pop();
+                if (deleteIds.has(branchId)) continue;
+                deleteIds.add(branchId);
+                stack.push(...(childrenByParent.get(branchId) || []));
+            }
+            const childCount = deleteIds.size - 1;
+            const childHint = childCount > 0 ? `及其 ${childCount} 条子分支` : '';
             confirmAction(
-                `确定要删除“${target.name}”吗？${hasChildren ? `下级分支会顺延到“${parent?.name || '主线'}”下，` : ''}该分支的聊天、记忆和 UI 状态会被删除，此操作无法撤销。`,
+                `确定要删除“${target.name}”${childHint}吗？相关聊天、记忆和 UI 状态也会删除，此操作无法撤销。`,
                 async () => {
                     try {
-                        if (target.id === activeStoryBranchId.value) {
-                            await switchStoryBranch(parentId, { closeModal: false, notify: false });
-                            if (activeStoryBranchId.value !== parentId) {
-                                throw new Error(`无法切换到“${parent?.name || '主线'}”`);
+                        if (deleteIds.has(activeStoryBranchId.value)) {
+                            await switchStoryBranch(STORY_BRANCH_MAIN_ID, { closeModal: false, notify: false });
+                            if (activeStoryBranchId.value !== STORY_BRANCH_MAIN_ID) {
+                                throw new Error('无法切换到主线');
                             }
                         }
                         storyBranchSwitching.value = true;
                         if (!getMainDb()) await initDB();
-                        const scopeId = getStoryBranchScopeId(char.uuid, target.id);
-                        await Promise.all([
+                        const scopeIds = [...deleteIds].map(branchId => getStoryBranchScopeId(char.uuid, branchId));
+                        await Promise.all(scopeIds.flatMap(scopeId => [
                             deleteScopedStoredValue('chat', scopeId),
                             deleteScopedStoredValue('memories', scopeId),
                             deleteScopedStoredValue('classic_memories', scopeId)
-                        ]);
-                        delete memorySettings.emptyTurns?.[getMemoryEmptyTurnsKey(scopeId)];
+                        ]));
+                        scopeIds.forEach(scopeId => {
+                            delete memorySettings.emptyTurns?.[getMemoryEmptyTurnsKey(scopeId)];
+                        });
                         getUiTemplatesForRuntime(char).forEach(template => {
                             if (!template.runtimeByCharacter) return;
-                            delete template.runtimeByCharacter[scopeId];
+                            scopeIds.forEach(scopeId => delete template.runtimeByCharacter[scopeId]);
                         });
-                        storyBranches.value.forEach(branch => {
-                            if (branch.parentId === target.id) branch.parentId = parentId;
-                        });
-                        storyBranches.value = storyBranches.value.filter(branch => branch.id !== target.id);
-                        selectedStoryBranchId.value = parentId;
+                        storyBranches.value = storyBranches.value.filter(branch => !deleteIds.has(branch.id));
+                        selectedStoryBranchId.value = activeStoryBranchId.value;
                         await Promise.all([
                             saveStoryBranchesForCharacter(char),
                             saveMemorySettingsNow(),
                             setStoredValue('global_ui_templates', globalUiTemplates.value),
                             saveCharactersNow()
                         ]);
-                        showToast(`已删除“${target.name}”${hasChildren ? '，下级分支已顺延保留' : ''}`, 'success');
+                        showToast(`已删除“${target.name}”${childHint}`, 'success');
                     } catch (error) {
                         console.error('Failed to delete story branch:', error);
                         showToast(`删除分支失败：${error.message || '请稍后重试'}`, 'error');
@@ -9131,8 +9146,6 @@ const app = createApp({
             await loadData();
             fetchQuota(); // Fetch quota after saved settings are loaded
 
-            updateModalRef.value?.check(); // 必须在 loadData 之后检查，否则同步存储尚未加载
-
             // Check for default username
             if (user.name === '请前往设置自定义你的名称') {
                 tempUserSetup.name = '';
@@ -9377,7 +9390,7 @@ const app = createApp({
             const profile = userProfiles.value.find(p => p.uuid === id);
             if (profile) {
                 activeProfileId.value = id;
-                Object.assign(user, { preferences: '', ...JSON.parse(JSON.stringify(profile)) });
+                Object.assign(user, JSON.parse(JSON.stringify(profile)));
                 saveData();
                 showToast(`已切换为人设: ${user.name}`, 'success');
             }
@@ -9388,7 +9401,6 @@ const app = createApp({
                 uuid: generateUUID(),
                 name: '新人设',
                 description: '',
-                preferences: '',
                 avatar: null,
                 person: 'second'
             };
@@ -9531,6 +9543,563 @@ const app = createApp({
             if (thirdPersonPreset) thirdPersonPreset.enabled = user.person === 'third';
         };
 
+        // --- 明文备份（Plain Backup）---
+        // 138 起备份统一导出为可读的明文文件（角色卡 PNG + 聊天记录 JSONL），
+        // 通过原生桥分块传输，由原生打包为 zip 保存；导入同时兼容明文与旧内部数据。
+        const plainBackupChunkSize = 256 * 1024;
+
+        const bytesToBase64 = (bytes) => {
+            let binary = '';
+            const chunk = 0x8000;
+            for (let i = 0; i < bytes.length; i += chunk) {
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunk, bytes.length)));
+            }
+            return btoa(binary);
+        };
+
+        const base64ToBytes = (base64) => {
+            const binary = atob(String(base64 || '').trim());
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+            return bytes;
+        };
+
+        const plainBackupSanitizeFileName = (name) => {
+            const cleaned = String(name || 'character').replace(/[\\/:*?"<>|\r\n\t]/g, '_').trim();
+            return cleaned || 'character';
+        };
+
+        const sanitizePlainBackupContent = (content) => {
+            if (typeof content !== 'string' || !content) return content;
+            return content.replace(/data-image-request="([^"]*)"/g, (_match, url) => {
+                const cleaned = String(url).replace(/([?&])token=[^&]*/g, '$1');
+                return `data-image-request="${cleaned}"`;
+            });
+        };
+
+        const buildCharacterChatJsonl = async (index, stripImages = false) => {
+            const char = characters.value[index];
+            if (!char) return null;
+            if (!getMainDb()) await initDB();
+            const isCurrentCharacter = currentCharacterIndex.value === index;
+            if (isCurrentCharacter) await flushPendingChatHistorySave();
+            const savedBranches = char.uuid ? await getScopedStoredValue('branches', char.uuid) : null;
+            const branches = isCurrentCharacter
+                ? cloneForStorage(storyBranches.value)
+                : normalizeStoryBranches(char, savedBranches);
+            const activeBranchId = isCurrentCharacter
+                ? activeStoryBranchId.value
+                : String(savedBranches?.activeBranchId || STORY_BRANCH_MAIN_ID);
+            const branchChats = await Promise.all(branches.map(async branch => {
+                let messages;
+                if (isCurrentCharacter && branch.id === activeStoryBranchId.value) {
+                    messages = cloneForStorage(chatHistory.value);
+                } else if (char.uuid) {
+                    messages = await getScopedStoredValue('chat', getStoryBranchScopeId(char.uuid, branch.id));
+                }
+                if (messages === undefined && branch.id === STORY_BRANCH_MAIN_ID) {
+                    messages = await getScopedStoredValue('chat', index);
+                }
+                messages = Array.isArray(messages) ? cloneForStorage(messages) : [];
+                messages = messages.map(message => {
+                    const result = { ...message };
+                    let changed = false;
+                    if (typeof message?.content === 'string' && message.content.includes('data-image-request')) {
+                        const sanitized = sanitizePlainBackupContent(message.content);
+                        if (sanitized !== message.content) {
+                            result.content = sanitized;
+                            changed = true;
+                        }
+                    }
+                    if (stripImages) {
+                        if (Array.isArray(message?.imageAttachments) && message.imageAttachments.length) {
+                            result.imageAttachments = [];
+                            changed = true;
+                        }
+                        if (typeof message?.avatar === 'string' && message.avatar.startsWith('data:')) {
+                            result.avatar = '';
+                            changed = true;
+                        }
+                    }
+                    return changed ? result : message;
+                });
+                return { branchId: branch.id, messages };
+            }));
+            const totalMessages = branchChats.reduce((sum, branch) => sum + branch.messages.length, 0);
+            if (!totalMessages) return null;
+            const chatByBranch = new Map(branchChats.map(branch => [branch.branchId, branch.messages]));
+            const branchMetadata = branches.map(branch => {
+                const messages = chatByBranch.get(branch.id) || [];
+                return {
+                    ...branch,
+                    floorCount: getPostprocessedChatMessages(messages, { includeSystem: false }).length,
+                    messageCount: messages.filter(message => ['user', 'assistant'].includes(message?.role)).length,
+                    wordCount: getConversationBodyLength(messages)
+                };
+            });
+            const manifest = {
+                type: STORY_BRANCH_CHAT_EXPORT_TYPE,
+                version: STORY_BRANCH_CHAT_EXPORT_VERSION,
+                characterName: char.name || '',
+                exportedAt: new Date().toISOString(),
+                activeBranchId: branchMetadata.some(branch => branch.id === activeBranchId) ? activeBranchId : STORY_BRANCH_MAIN_ID,
+                branches: branchMetadata
+            };
+            const lines = [manifest, ...branchChats].map(record => JSON.stringify(record)).join('\n');
+            return { lines, characterName: char.name || '' };
+        };
+
+        const buildCharacterMemoriesJson = async (char) => {
+            if (!char?.uuid) return null;
+            const savedBranches = await getScopedStoredValue('branches', char.uuid);
+            const branches = normalizeStoryBranches(char, savedBranches);
+            const memoryBranches = [];
+            for (const branch of branches) {
+                const scopeId = getStoryBranchScopeId(char.uuid, branch.id);
+                const vectorMemories = await getScopedStoredValue('memories', scopeId);
+                const classicMemories = await getScopedStoredValue('classic_memories', scopeId);
+                const vectorArr = Array.isArray(vectorMemories) ? vectorMemories : [];
+                const classicArr = Array.isArray(classicMemories) ? classicMemories : [];
+                if (!vectorArr.length && !classicArr.length) continue;
+                memoryBranches.push({
+                    branchId: branch.id,
+                    branchName: branch.name,
+                    vectorMemories: vectorArr,
+                    classicMemories: classicArr
+                });
+            }
+            if (!memoryBranches.length) return null;
+            return JSON.stringify({ characterName: char.name || '', branches: memoryBranches }, null, 2);
+        };
+
+        const GLOBAL_BACKUP_KEYS = [
+            'settings', 'presets', 'global_regex', 'global_worldinfo', 'worldinfo_settings',
+            'global_ui_templates', 'active_tools', 'user', 'user_profiles', 'active_profile_id',
+            'memory_settings', 'token_usage_history'
+        ];
+
+        const buildGlobalDataFiles = async () => {
+            const files = [];
+            for (const key of GLOBAL_BACKUP_KEYS) {
+                try {
+                    let value = await getStoredValue(key);
+                    if (value === undefined || value === null) continue;
+                    if (key === 'settings') {
+                        value = cloneForStorage(value);
+                        delete value.apiKey;
+                        delete value.apiProviderKeys;
+                        delete value.imageGenKey;
+                    } else if (key === 'active_tools') {
+                        value = cloneForStorage(value);
+                        if (Array.isArray(value)) {
+                            value.forEach(tool => {
+                                if (tool && typeof tool === 'object') delete tool.tavilyApiKey;
+                            });
+                        }
+                    }
+                    files.push({ path: 'data/' + key + '.json', base64: cardUtils.encodeBase64Utf8(JSON.stringify(value, null, 2)) });
+                } catch (e) {
+                    console.error('Plain backup global data error for', key, e);
+                }
+            }
+            return files;
+        };
+
+        const collectPlainBackupFiles = async (onProgress, stripImages = false) => {
+            const totalSteps = characters.value.length;
+            const charManifest = new Array(totalSteps);
+            const perCharFiles = new Array(totalSteps);
+            let completed = 0;
+            let cursor = 0;
+            const CONCURRENCY = Math.min(4, totalSteps);
+            const workers = Array.from({ length: CONCURRENCY }, async () => {
+                while (cursor < totalSteps) {
+                    const i = cursor;
+                    cursor += 1;
+                    const char = characters.value[i];
+                    const name = plainBackupSanitizeFileName(char.name);
+                    const localFiles = [];
+                    try {
+                        const v2Data = buildCharacterExportData(char);
+                        const avatarSrc = String(char.avatar || '');
+                        const isRemoteAvatar = avatarSrc.startsWith('http://') || avatarSrc.startsWith('https://');
+                        const pngBytes = await cardUtils.imageUrlToPngBytes(
+                            avatarSrc,
+                            isRemoteAvatar ? { crossOrigin: 'Anonymous' } : {}
+                        );
+                        const finalPng = cardUtils.injectPngTextChunk(pngBytes, 'chara', cardUtils.encodeBase64Utf8(JSON.stringify(v2Data)));
+                        localFiles.push({ path: 'characters/' + name + '_' + i + '.png', base64: bytesToBase64(finalPng) });
+                    } catch (pngErr) {
+                        console.error('Plain backup PNG error for', char.name, pngErr);
+                    }
+                    try {
+                        const chat = await buildCharacterChatJsonl(i, stripImages);
+                        if (chat) {
+                            localFiles.push({ path: 'chats/' + name + '_' + i + '.jsonl', base64: cardUtils.encodeBase64Utf8(chat.lines) });
+                        }
+                    } catch (chatErr) {
+                        console.error('Plain backup chat error for', char.name, chatErr);
+                    }
+                    try {
+                        const memoriesJson = await buildCharacterMemoriesJson(char);
+                        if (memoriesJson) {
+                            localFiles.push({ path: 'memories/' + name + '_' + i + '.json', base64: cardUtils.encodeBase64Utf8(memoriesJson) });
+                        }
+                    } catch (memoryErr) {
+                        console.error('Plain backup memories error for', char.name, memoryErr);
+                    }
+                    charManifest[i] = { index: i, name: char.name || '', uuid: char.uuid || null };
+                    perCharFiles[i] = localFiles;
+                    completed += 1;
+                    if (onProgress) onProgress(completed, totalSteps, 'collect');
+                }
+            });
+            await Promise.all(workers);
+
+            const files = [];
+            for (let i = 0; i < totalSteps; i += 1) {
+                if (perCharFiles[i]) files.push(...perCharFiles[i]);
+            }
+            const globalDataFiles = await buildGlobalDataFiles();
+            files.push(...globalDataFiles);
+            const manifest = {
+                format: 'rphub-plain-backup',
+                version: 1,
+                exportedAt: new Date().toISOString(),
+                characters: charManifest.filter(Boolean)
+            };
+            files.push({ path: 'manifest.json', base64: cardUtils.encodeBase64Utf8(JSON.stringify(manifest, null, 2)) });
+            return files;
+        };
+
+        const exportAllPlainBackup = async (stripImages = false) => {
+            try {
+                showToast(stripImages
+                    ? '正在导出精简备份（不含图片）…，进度见通知栏'
+                    : '正在导出完整备份…，进度见通知栏', 'info');
+                const native = window.RoleplayHubNative;
+                if (!native || typeof native.beginPlainBackup !== 'function') {
+                    showToast('当前环境不支持明文备份', 'error');
+                    return;
+                }
+                const safeProgress = (done, total, stage) => {
+                    try {
+                        if (native && typeof native.onBackupProgress === 'function') {
+                            native.onBackupProgress(done, total, stage);
+                        }
+                    } catch (_) { /* 原生不可用时静默 */ }
+                };
+                await saveData({ saveMemories: true, saveCharacters: true });
+                const files = await collectPlainBackupFiles(safeProgress, stripImages);
+                if (!files.length) {
+                    showToast('没有可导出的数据', 'warning');
+                    return;
+                }
+                native.beginPlainBackup(files.length);
+                for (let i = 0; i < files.length; i += 1) {
+                    await yieldToUi();
+                    const file = files[i];
+                    native.beginPlainBackupFile(file.path, file.base64.length);
+                    for (let off = 0; off < file.base64.length; off += plainBackupChunkSize) {
+                        native.addPlainBackupChunk(file.base64.substring(off, off + plainBackupChunkSize));
+                    }
+                    native.endPlainBackupFile();
+                    safeProgress(i + 1, files.length, 'transfer');
+                }
+                native.finishPlainBackup();
+                showToast('正在生成明文备份…', 'info');
+            } catch (e) {
+                console.error('Plain backup export error:', e);
+                showToast('明文备份导出失败: ' + (e?.message || e), 'error', 5000);
+            }
+        };
+
+        const buildCharacterFromImport = (rawData, avatarUrl) => {
+            const imported = cardUtils.parseImportedCharacterCard(rawData);
+            return {
+                name: imported.name,
+                description: imported.description,
+                first_mes: imported.first_mes,
+                avatar: avatarUrl || defaultAvatar,
+                personality: imported.personality,
+                creator_notes: imported.creator_notes,
+                worldInfo: imported.worldInfoEntries
+                    .map(entry => normalizeWorldInfoEntry({ ...entry, scope: 'character' }))
+                    .filter(entry => entry.scope !== 'global'),
+                regexScripts: imported.regexScripts
+                    .map(script => cardUtils.normalizeImportedRegexScript(
+                        { ...script, scope: 'character' },
+                        { fallbackScope: 'character', systemNames: systemRegexNames }
+                    ))
+                    .filter(script => script.scope !== 'global'),
+                uiTemplates: imported.uiTemplates.map(template => normalizeUiTemplate({
+                    ...sanitizeUiTemplateImportEntry(template),
+                    id: generateUUID(),
+                    scope: 'character'
+                })),
+                recentGenerationTimes: [],
+                uuid: generateUUID(),
+                createdAt: Date.now()
+            };
+        };
+
+        const importChatJsonlForCharacter = async (char, text) => {
+            const records = String(text || '')
+                .split(/\r?\n/)
+                .filter(line => line.trim())
+                .map(line => JSON.parse(line));
+            if (!records.length) return 0;
+            if (records.some(message => !message || typeof message !== 'object' || Array.isArray(message))) {
+                throw new Error('聊天记录包含无效消息');
+            }
+            if (records[0]?.type === STORY_BRANCH_CHAT_EXPORT_TYPE) {
+                const manifest = records[0];
+                if (Number(manifest.version) !== STORY_BRANCH_CHAT_EXPORT_VERSION) {
+                    throw new Error('不支持的分支聊天版本：' + manifest.version);
+                }
+                if (!Array.isArray(manifest.branches) || !manifest.branches.length) {
+                    throw new Error('文件中没有分支信息');
+                }
+                const chatByBranch = new Map();
+                records.slice(1).forEach(record => {
+                    const branchId = String(record?.branchId || '').trim();
+                    if (!branchId || !Array.isArray(record?.messages)) throw new Error('分支聊天数据不完整');
+                    if (record.messages.some(message => !message || typeof message !== 'object' || Array.isArray(message))) {
+                        throw new Error('分支"' + branchId + '"包含无效消息');
+                    }
+                    if (chatByBranch.has(branchId)) throw new Error('分支"' + branchId + '"重复');
+                    chatByBranch.set(branchId, cloneForStorage(record.messages));
+                });
+                const importedBranches = normalizeStoryBranches(char, { branches: manifest.branches });
+                importedBranches.forEach(branch => {
+                    if (!chatByBranch.has(branch.id)) throw new Error('缺少分支"' + branch.name + '"的聊天记录');
+                    const messages = chatByBranch.get(branch.id);
+                    branch.floorCount = getPostprocessedChatMessages(messages, { includeSystem: false }).length;
+                    branch.messageCount = messages.filter(message => ['user', 'assistant'].includes(message.role)).length;
+                    branch.wordCount = getConversationBodyLength(messages);
+                });
+                const importedIds = new Set(importedBranches.map(branch => branch.id));
+                if ([...chatByBranch.keys()].some(branchId => !importedIds.has(branchId))) {
+                    throw new Error('聊天记录中包含未知分支');
+                }
+                const importedActiveId = importedIds.has(String(manifest.activeBranchId))
+                    ? String(manifest.activeBranchId)
+                    : STORY_BRANCH_MAIN_ID;
+                await Promise.all([
+                    ...importedBranches.map(branch => setScopedStoredValue(
+                        'chat',
+                        getStoryBranchScopeId(char.uuid, branch.id),
+                        chatByBranch.get(branch.id),
+                        { clone: false }
+                    )),
+                    setScopedStoredValue('branches', char.uuid, {
+                        version: 1,
+                        activeBranchId: importedActiveId,
+                        branches: cloneForStorage(importedBranches)
+                    }, { clone: false })
+                ]);
+                return [...chatByBranch.values()].reduce((sum, messages) => sum + messages.length, 0);
+            }
+            const importedChat = cloneForStorage(records);
+            await setScopedStoredValue('chat', getStoryBranchScopeId(char.uuid, STORY_BRANCH_MAIN_ID), importedChat, { clone: false });
+            await setScopedStoredValue('branches', char.uuid, {
+                version: 1,
+                activeBranchId: STORY_BRANCH_MAIN_ID,
+                branches: normalizeStoryBranches(char, null)
+            }, { clone: false });
+            return importedChat.length;
+        };
+
+        const clearAllDataForRestore = async () => {
+            if (!getMainDb()) await initDB();
+            const mainKeys = await readStorageKeys(getMainDb());
+            const legacyKeys = getLegacyDb() ? await readStorageKeys(getLegacyDb()) : [];
+            if (mainKeys.length) await deleteStorageKeys(getMainDb(), mainKeys);
+            if (legacyKeys.length) await deleteStorageKeys(getLegacyDb(), legacyKeys);
+        };
+
+        const importAllPlainBackupFiles = async (files) => {
+            if (!Array.isArray(files) || !files.length) return '备份中没有数据';
+
+            // 恢复采用覆盖语义：先清空本地全部数据，仅保留设备本地的密钥
+            const currentSettings = await getStoredValue('settings');
+            const currentActiveTools = await getStoredValue('active_tools');
+            const keptSecrets = {
+                apiKey: currentSettings?.apiKey,
+                apiProviderKeys: currentSettings?.apiProviderKeys,
+                imageGenKey: currentSettings?.imageGenKey,
+                tavilyByTool: (Array.isArray(currentActiveTools) ? currentActiveTools : [])
+                    .filter(tool => tool && typeof tool === 'object' && tool.tavilyApiKey !== undefined)
+                    .map(tool => ({ id: tool.id, callName: tool.callName, tavilyApiKey: tool.tavilyApiKey }))
+            };
+            await clearAllDataForRestore();
+            characters.value = [];
+            clearCurrentCharacterData();
+
+            const charFiles = files.filter(file => (file.path || '').startsWith('characters/'));
+            const chatFiles = files.filter(file => (file.path || '').startsWith('chats/'));
+            const nameToChar = new Map();
+
+            let importedChars = 0;
+            for (const file of charFiles) {
+                try {
+                    const path = file.path || '';
+                    if (path.toLowerCase().endsWith('.png')) {
+                        const bytes = base64ToBytes(file.base64);
+                        const { data } = cardUtils.parsePngCharacterData(bytes.buffer);
+                        const blob = new Blob([bytes], { type: 'image/png' });
+                        const avatarUrl = await cardUtils.blobToDataUrl(blob);
+                        const char = buildCharacterFromImport(data, avatarUrl);
+                        characters.value.push(char);
+                        nameToChar.set(char.name, char);
+                        importedChars += 1;
+                    } else if (path.toLowerCase().endsWith('.json')) {
+                        const text = cardUtils.decodeBase64Utf8(file.base64);
+                        const data = JSON.parse(text);
+                        const char = buildCharacterFromImport(data, null);
+                        characters.value.push(char);
+                        nameToChar.set(char.name, char);
+                        importedChars += 1;
+                    }
+                } catch (e) {
+                    console.error('Import character failed:', file.path, e);
+                }
+            }
+
+            let importedMessages = 0;
+            for (const file of chatFiles) {
+                try {
+                    const text = cardUtils.decodeBase64Utf8(file.base64);
+                    const records = text.split(/\r?\n/).filter(line => line.trim()).map(line => JSON.parse(line));
+                    const characterName = records[0]?.characterName || '';
+                    const char = nameToChar.get(characterName);
+                    if (!char) {
+                        console.warn('找不到对应角色，跳过聊天记录:', characterName);
+                        continue;
+                    }
+                    importedMessages += await importChatJsonlForCharacter(char, text);
+                } catch (e) {
+                    console.error('Import chat failed:', file.path, e);
+                }
+            }
+
+            let importedMemories = 0;
+            const memoryFiles = files.filter(file => (file.path || '').startsWith('memories/'));
+            for (const file of memoryFiles) {
+                try {
+                    const text = cardUtils.decodeBase64Utf8(file.base64);
+                    const data = JSON.parse(text);
+                    const char = nameToChar.get(data.characterName);
+                    if (!char) {
+                        console.warn('找不到对应角色，跳过记忆:', data.characterName);
+                        continue;
+                    }
+                    if (!Array.isArray(data.branches)) continue;
+                    for (const branch of data.branches) {
+                        const scopeId = getStoryBranchScopeId(char.uuid, branch.branchId);
+                        if (Array.isArray(branch.vectorMemories) && branch.vectorMemories.length) {
+                            await setScopedStoredValue('memories', scopeId, branch.vectorMemories, { clone: false });
+                        }
+                        if (Array.isArray(branch.classicMemories) && branch.classicMemories.length) {
+                            await setScopedStoredValue('classic_memories', scopeId, branch.classicMemories, { clone: false });
+                        }
+                    }
+                    importedMemories += 1;
+                } catch (e) {
+                    console.error('Import memories failed:', file.path, e);
+                }
+            }
+
+            let importedGlobals = 0;
+            const dataFiles = files.filter(file => (file.path || '').startsWith('data/'));
+            for (const file of dataFiles) {
+                try {
+                    const key = (file.path || '').replace(/^data\//, '').replace(/\.json$/i, '');
+                    if (!key) continue;
+                    let value = JSON.parse(cardUtils.decodeBase64Utf8(file.base64));
+                    if (key === 'settings') {
+                        if (value.apiKey === undefined && keptSecrets.apiKey !== undefined) value.apiKey = keptSecrets.apiKey;
+                        if (value.apiProviderKeys === undefined && keptSecrets.apiProviderKeys !== undefined) value.apiProviderKeys = keptSecrets.apiProviderKeys;
+                        if (value.imageGenKey === undefined && keptSecrets.imageGenKey !== undefined) value.imageGenKey = keptSecrets.imageGenKey;
+                    } else if (key === 'active_tools') {
+                        if (Array.isArray(value)) {
+                            const secretById = new Map();
+                            const secretByName = new Map();
+                            keptSecrets.tavilyByTool.forEach(secret => {
+                                if (secret.id) secretById.set(secret.id, secret.tavilyApiKey);
+                                if (secret.callName) secretByName.set(secret.callName, secret.tavilyApiKey);
+                            });
+                            value = value.map(tool => {
+                                if (!tool || typeof tool !== 'object' || tool.tavilyApiKey !== undefined) return tool;
+                                const match = secretById.get(tool.id) ?? secretByName.get(tool.callName);
+                                if (match !== undefined) return { ...tool, tavilyApiKey: match };
+                                return tool;
+                            });
+                        }
+                    }
+                    await setStoredValue(key, value, { clone: false });
+                    importedGlobals += 1;
+                } catch (e) {
+                    console.error('Import global data failed:', file.path, e);
+                }
+            }
+
+            if (!getMainDb()) await initDB();
+            await saveCharactersNow();
+            return '导入完成：' + importedChars + ' 个角色，' + importedMessages + ' 条聊天记录，' + importedMemories + ' 个角色记忆，' + importedGlobals + ' 项全局数据';
+        };
+
+        const plainBackupImportState = {
+            files: [],
+            currentPath: '',
+            currentBase64: ''
+        };
+
+        const importBeginPlainBackup = (count) => {
+            plainBackupImportState.files = [];
+            plainBackupImportState.currentPath = '';
+            plainBackupImportState.currentBase64 = '';
+        };
+
+        const importFileChunkPlainBackup = (path, base64, isLast) => {
+            const state = plainBackupImportState;
+            if (state.currentPath !== path) {
+                if (state.currentPath) {
+                    state.files.push({ path: state.currentPath, base64: state.currentBase64 });
+                }
+                state.currentPath = path;
+                state.currentBase64 = '';
+            }
+            state.currentBase64 += base64;
+            if (isLast) {
+                state.files.push({ path: state.currentPath, base64: state.currentBase64 });
+                state.currentPath = '';
+                state.currentBase64 = '';
+            }
+        };
+
+        const importFinishPlainBackup = async () => {
+            const files = plainBackupImportState.files;
+            plainBackupImportState.files = [];
+            plainBackupImportState.currentPath = '';
+            plainBackupImportState.currentBase64 = '';
+            try {
+                const message = await importAllPlainBackupFiles(files);
+                showToast(message, 'success', 4000);
+            } catch (e) {
+                console.error('Plain backup import error:', e);
+                showToast('明文备份导入失败: ' + (e?.message || e), 'error', 5000);
+            }
+            setTimeout(() => location.reload(), 1600);
+        };
+
+        window.RPHubPlainBackup = {
+            exportAll: exportAllPlainBackup,
+            importBegin: importBeginPlainBackup,
+            importFileChunk: importFileChunkPlainBackup,
+            importFinish: importFinishPlainBackup
+        };
+
         return {
             switchProfile, createNewProfile, deleteProfile, userProfiles, activeProfileId, showProfileDropdown,
             processMainContent, replaceUserNamePlaceholder,
@@ -9553,7 +10122,6 @@ const app = createApp({
             getUncachedInputTokens, formatTokenCount, formatTokenAggregate, formatTokenUsageTime, getTokenUsageTypeLabel, clearTokenUsageHistory,
             storageStats, refreshStorageStats, cleanupUnusedStorage, formatStorageSize,
             showCharacterExportModal, openCharacterExportModal, confirmCharacterExport, // Character Export Modal
-            updateModalRef, latestUpdateConfig,
             showConfirmModal, confirmMessage, modelMode, chatModelSlots, selectChatModelSlot, reasoningEffortSlider, reasoningEffortLabel, showNoMemoryNeededModal, // Export for template
             isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, pendingChatImages, pendingChatImageReadCount, isRecognizingImages, requestChatImageSelection, handleChatImageSelection, removePendingChatImage, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
             user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, switchingCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, fontSizeOptions, availableImageStyleOptions, imageModelOptions, imageSizeOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
@@ -9567,7 +10135,7 @@ const app = createApp({
             editorTab, characterDisplayLimit, hasOpenedCharacterManager, isDesktopCharacterLayout, displayedCharacters, loadMoreCharacters,
             isAutoImageGenEnabled,
             apiStatus, apiLatency, imageGenStatus, imageGenLatency, checkAllStatuses, // Status Exports
-            toggleAutoImageGen, setWorldInfoEnabled, handleGeneratedImageReroll,
+            toggleAutoImageGen, setWorldInfoEnabled, handleGeneratedImageReroll, handleGeneratedImageSave,
             quotaValue, quotaLoading, quotaError,
             // Memory System Exports
             classicMemoryPage, classicMemoryPageCount, memorySettings, retryingClassicMemoryId, retryClassicMemory,
@@ -9730,7 +10298,7 @@ const app = createApp({
                 showToast(`成功导入 ${normalized.length} 个分片`, 'success');
             }, error => showToast(`导入失败: ${error.message || 'JSON 格式错误'}`, 'error')),
             toggleMobileMenu, closeMobileMenu,
-            fetchModels, selectModel, selectQuickModels, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
+            fetchModels, selectModel, selectQuickModels,             sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
             handleConfirm, handleCancel, // Export handlers
             copyMessage, playMessageActionFeedback, canDeleteMessage, deleteMessage, regenerateMessage,
             editMessage, saveEditMessage, cancelEditMessage,

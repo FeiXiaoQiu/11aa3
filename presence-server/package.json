@@ -1,5 +1,5 @@
 {
-  "name": "rphub-update-check",
+  "name": "rphub-presence",
   "version": "1.0.0",
   "private": true,
   "type": "module",

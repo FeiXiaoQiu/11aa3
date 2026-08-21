@@ -1025,6 +1025,5 @@ window.RPHubUtils = {
                 { group: '对话中', value: 'assistant_top', label: '助手消息顶部' }
             ])
         }),
-        latestUpdate: window.RPHubLatestUpdate
     });
 })();

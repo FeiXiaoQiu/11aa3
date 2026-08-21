@@ -606,19 +606,4 @@ ${uiTemplateAnalysisSection}
     });
 })();
 
-// --- Update announcement (keep this section at the bottom) ---
-window.RPHubLatestUpdate = Object.freeze({
-    id: 10194,
-    title: '网站公告',
-    content: `
-### RP-Hub 1.8.6
 
-- 新增生图版本选择，支持最新 V5 完整版
-
-- 优化了 V5 画风兼容，自动迁移不支持的画风
-- 优化了角色卡工坊生图配置同步
-- 生图尺寸调整为比例选择
-
-#### 更新时间：08/21/09:34
-    `
-});

@@ -30,7 +30,6 @@ const {
     UiTemplatesView,
     UiTemplateEditorModal,
     UiTemplatePending,
-    UpdateNotificationModal,
     UserSetupModal,
     WorldInfoEditorModal
 } = window.RPHubComponents;
@@ -144,7 +143,6 @@ const {
     defaultApiConfig: DEFAULT_API_CONFIG,
     defaultApiProviderId: DEFAULT_API_PROVIDER_ID,
     imageGenBaseUrl: IMAGE_GEN_BASE_URL,
-    latestUpdate: latestUpdateConfig,
     systemRegexNames,
     systemWorldInfoNames,
     uiOptions
@@ -189,7 +187,6 @@ const app = createApp({
         TokenUsageView,
         UiTemplatesView,
         UiTemplateEditorModal,
-        UpdateNotificationModal,
         UiTemplatePending,
         UserSetupModal,
         WorldInfoEditorModal
@@ -200,6 +197,7 @@ const app = createApp({
             fontFamilies: fontFamilyOptions,
             fontSizes: fontSizeOptions,
             imageCounts: imageGenCountOptions,
+            imageModels: imageModelOptions,
             imageSizes: imageSizeOptions,
             imageStyles: imageStyleOptions,
             popularModelFamilies,
@@ -236,8 +234,6 @@ const app = createApp({
             onConfirm: null,
             onCancel: null
         });
-        const updateModalRef = ref(null);
-
         const showVueConfirmModal = (title, message) => {
             return new Promise((resolve) => {
                 globalConfirmModal.value = {
@@ -550,6 +546,7 @@ const app = createApp({
         const user = reactive({
             name: '请前往设置自定义你的名称',
             description: '',
+            preferences: '',
             avatar: '',
             person: 'second', //记录人称偏好：second 或 third
         });
@@ -569,6 +566,7 @@ const app = createApp({
                     const currentProfile = userProfiles.value[profileIndex];
                     if (currentProfile.name !== newVal.name ||
                         currentProfile.description !== newVal.description ||
+                        currentProfile.preferences !== newVal.preferences ||
                         currentProfile.avatar !== newVal.avatar ||
                         currentProfile.person !== newVal.person) {
                         userProfiles.value[profileIndex] = JSON.parse(JSON.stringify(newVal));
@@ -609,6 +607,7 @@ const app = createApp({
             imageGenKey: '',
             imageStyle: 'vertical',
             customImageArtists: '',
+            imageModel: 'nai-diffusion-4-5-full',
             imageSize: '竖图',
             imageGenCount: 2,
             qualityModel: DEFAULT_API_CONFIG.qualityModel,
@@ -616,6 +615,12 @@ const app = createApp({
             fastModel: DEFAULT_API_CONFIG.fastModel,
             visionModel: ''
         });
+        const v5UnsupportedImageStyles = new Set(['r18', 'lolita25d', 'anime']);
+        const availableImageStyleOptions = computed(() => settings.imageModel === 'nai-diffusion-5-full'
+            ? imageStyleOptions.filter(option => !v5UnsupportedImageStyles.has(option.value))
+            : imageStyleOptions);
+        const getImageModelName = (value) => (imageModelOptions.find(option => option.value === value)?.label
+            || imageModelOptions[0].label).replace(/（[^）]*）$/, '');
         const normalizeFontFamily = (value) => ['modern', 'serif', 'system'].includes(value) ? value : 'modern';
         const normalizeFontSize = (value) => {
             const size = Number(value);
@@ -797,7 +802,7 @@ const app = createApp({
         }, { deep: true });
 
         // Watch image gen and model settings for sync
-        watch(() => [settings.imageGenKey, settings.imageStyle, settings.customImageArtists, settings.imageGenCount, settings.qualityModel, settings.balancedModel, settings.fastModel, settings.uiTemplateModel, settings.fontFamily, settings.fontFamilyVersion], () => {
+        watch(() => [settings.imageGenKey, settings.imageModel, settings.imageStyle, settings.customImageArtists, settings.imageGenCount, settings.qualityModel, settings.balancedModel, settings.fastModel, settings.uiTemplateModel, settings.fontFamily, settings.fontFamilyVersion], () => {
             syncSettingsToGenerator();
         });
 
@@ -821,10 +826,10 @@ const app = createApp({
         });
         const reasoningEffortOptions = [
             { value: 'none', label: '关闭' },
-            { value: 'low', label: '低' },
-            { value: 'medium', label: '中' },
-            { value: 'high', label: '高' },
-            { value: 'max', label: '最高' },
+            { value: 'low', label: '低（low）' },
+            { value: 'medium', label: '中（medium）' },
+            { value: 'high', label: '高（high）' },
+            { value: 'max', label: '最高（max）' },
             { value: '', label: '默认' }
         ];
         const reasoningEffortSlider = computed({
@@ -1783,6 +1788,13 @@ const app = createApp({
                 settings.fontFamily = normalizeFontFamily(settings.fontFamily);
                 settings.fontSize = normalizeFontSize(settings.fontSize);
                 if (settings.reasoningEffort === 'xhigh') settings.reasoningEffort = 'max';
+                if (!imageModelOptions.some(option => option.value === settings.imageModel)) {
+                    settings.imageModel = imageModelOptions[0].value;
+                }
+                if (!imageSizeOptions.some(option => option.value === settings.imageSize)) {
+                    const legacySize = String(settings.imageSize || '');
+                    settings.imageSize = legacySize.includes('横') ? '横图' : legacySize.includes('方') ? '方图' : '竖图';
+                }
                 settings.fontFamilyVersion = 4;
                 applyFontFamily(settings.fontFamily);
                 delete settings.renderLayerLimit;
@@ -1834,7 +1846,7 @@ const app = createApp({
                 const savedActiveId = await getStoredValue('active_profile_id');
 
                 if (savedProfiles && savedProfiles.length > 0) {
-                    userProfiles.value = savedProfiles;
+                    userProfiles.value = savedProfiles.map(profile => ({ ...profile, preferences: String(profile?.preferences || '') }));
                     activeProfileId.value = savedActiveId || savedProfiles[0].uuid;
                     const activeProfile = userProfiles.value.find(p => p.uuid === activeProfileId.value);
                     if (activeProfile) {
@@ -9134,8 +9146,6 @@ const app = createApp({
             await loadData();
             fetchQuota(); // Fetch quota after saved settings are loaded
 
-            updateModalRef.value?.check(); // 必须在 loadData 之后检查，否则同步存储尚未加载
-
             // Check for default username
             if (user.name === '请前往设置自定义你的名称') {
                 tempUserSetup.name = '';
@@ -10112,10 +10122,9 @@ const app = createApp({
             getUncachedInputTokens, formatTokenCount, formatTokenAggregate, formatTokenUsageTime, getTokenUsageTypeLabel, clearTokenUsageHistory,
             storageStats, refreshStorageStats, cleanupUnusedStorage, formatStorageSize,
             showCharacterExportModal, openCharacterExportModal, confirmCharacterExport, // Character Export Modal
-            updateModalRef, latestUpdateConfig,
             showConfirmModal, confirmMessage, modelMode, chatModelSlots, selectChatModelSlot, reasoningEffortSlider, reasoningEffortLabel, showNoMemoryNeededModal, // Export for template
             isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, pendingChatImages, pendingChatImageReadCount, isRecognizingImages, requestChatImageSelection, handleChatImageSelection, removePendingChatImage, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
-            user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, switchingCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, fontSizeOptions, imageStyleOptions, imageSizeOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
+            user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, switchingCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, fontSizeOptions, availableImageStyleOptions, imageModelOptions, imageSizeOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
             activeTools, activeToolAggressivenessOptions: ACTIVE_TOOL_AGGRESSIVENESS_OPTIONS, editingActiveTool, normalizeActiveTools, isWebActiveTool, getActiveToolDisplayDescription, getActiveToolResultCountMin, getActiveToolResultCountMax,
             getToolCallModeText, hasThinkingOrTools, isMessageThinkingOrRunning, isThinkingSummaryOpen, toggleThinkingSummary, markThinkingSummaryDetailOpened, getTimelineSteps,
             chatRoundStats, conversationBodyLength, summaryCompressedBodyLength, summaryCompressionRate,
