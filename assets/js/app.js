@@ -2149,7 +2149,10 @@ const app = createApp({
             if (!message || imageIndex < 0 || !imageMatch) return;
             if (card.classList.contains('is-rerolling')) return;
 
-            const tags = imageMatch[1].split(',').map(tag => tag.trim()).filter(Boolean);
+            let tags = imageMatch[1].split(',').map(tag => tag.trim()).filter(Boolean);
+            if (tags.length < 2) {
+                tags = imageMatch[1].split(/\s+/).map(tag => tag.trim()).filter(Boolean);
+            }
             if (tags.length < 2) {
                 showToast('提示词太短，无法重新生成', 'warning');
                 return;
