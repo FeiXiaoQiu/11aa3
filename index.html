@@ -409,6 +409,7 @@
                                 <div class="group relative"
                                     :class="{'w-full': messageUsesWideLayout(msg) || msg.isEditing_Message, 'message-edit-group': msg.isEditing_Message}">
                                     <div @click="handleGeneratedImageReroll($event, index)"
+                                        @click="handleGeneratedImageSave($event, index)"
                                         :class="['p-0 rounded-2xl shadow-sm text-sm md:text-base leading-relaxed overflow-hidden',
                                         msg.shouldAnimate && !(msg.role === 'assistant' && msg.reasoning) ? 'animate-message-in' : '',
                                         messageUsesWideLayout(msg) || msg.isEditing_Message ? 'w-full' : '',
