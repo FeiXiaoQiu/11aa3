@@ -37,5 +37,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: Roleplay Hub Android ${{ github.ref_name }}
-          files: android-app/app/build/outputs/apk/release/RoleplayHub-Beta-*.apk
+          files: android-app/app/build/outputs/apk/release/RoleplayHub-*.apk
           generate_release_notes: false
