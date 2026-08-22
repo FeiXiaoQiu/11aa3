@@ -39,3 +39,4 @@ jobs:
           name: Roleplay Hub Android ${{ github.ref_name }}
           files: android-app/app/build/outputs/apk/release/RoleplayHub-*.apk
           generate_release_notes: false
+          draft: false
