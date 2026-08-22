@@ -2162,11 +2162,6 @@ const app = createApp({
                 + mainText.slice(imageMatch.index + imageMatch[0].length);
             const mainStart = message.content.lastIndexOf(mainText);
             if (mainStart < 0) return;
-            const sourceUrl = card.dataset.imageRequest || card.querySelector('img')?.getAttribute('src');
-            if (!sourceUrl) return;
-            const nextImageUrl = new URL(sourceUrl, window.location.href);
-            nextImageUrl.searchParams.set('tag', tags.join(', '));
-            nextImageUrl.searchParams.set('nocache', '1');
 
             const originalContent = message.content;
             const finishLoading = () => {
@@ -2176,22 +2171,39 @@ const app = createApp({
             card.classList.add('is-rerolling');
             button.disabled = true;
 
-            const job = await loadGeneratedImageCard(card, nextImageUrl.href, { fresh: true });
-            if (job.status === 'done') {
-                if (chatHistory.value[messageIndex] !== message || message.content !== originalContent) {
+            try {
+                const sourceUrl = card.dataset.imageRequest;
+                if (!sourceUrl) {
+                    showToast('找不到原始生图请求，无法重新生成', 'error');
                     finishLoading();
                     return;
                 }
-                message.content = originalContent.slice(0, mainStart)
-                    + updatedMainText
-                    + originalContent.slice(mainStart + mainText.length);
-                message.shouldAnimate = false;
-                scheduleChatHistorySave();
-                showToast('已重新生成图片', 'success');
-                nextTick(finishLoading);
-                return;
+                const nextImageUrl = new URL(sourceUrl, window.location.href);
+                nextImageUrl.searchParams.set('tag', tags.join(', '));
+                nextImageUrl.searchParams.set('nocache', '1');
+
+                const job = await loadGeneratedImageCard(card, nextImageUrl.href, { fresh: true });
+                if (job.status === 'done') {
+                    if (chatHistory.value[messageIndex] !== message || message.content !== originalContent) {
+                        finishLoading();
+                        return;
+                    }
+                    message.content = originalContent.slice(0, mainStart)
+                        + updatedMainText
+                        + originalContent.slice(mainStart + mainText.length);
+                    message.shouldAnimate = false;
+                    scheduleChatHistorySave();
+                    showToast('已重新生成图片', 'success');
+                    nextTick(finishLoading);
+                    return;
+                }
+                showToast(`重新生成失败：${job.error || '未知错误'}`, 'error');
+            } catch (error) {
+                console.error('Image reroll failed:', error);
+                showToast(`重新生成失败：${error.message || '未知错误'}`, 'error');
+            } finally {
+                finishLoading();
             }
-            finishLoading();
         };
 
         const handleGeneratedImageSave = (event, messageIndex) => {
@@ -8053,7 +8065,7 @@ const app = createApp({
             const targetArtists = cardUtils.getImageStyleArtists(settings.imageStyle, settings.customImageArtists);
 
             const encodedTargetArtists = encodeURIComponent(targetArtists);
-            const imageRequestUrl = `${baseUrl}/generate?tag=$1&token=${encodeURIComponent(imageGenToken)}&model=nai-diffusion-4-5-full&artist=${encodedTargetArtists}&size=${settings.imageSize}&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers}},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras`;
+            const imageRequestUrl = `${baseUrl}/generate?tag=$1&token=${encodeURIComponent(imageGenToken)}&model=${settings.imageModel}&artist=${encodedTargetArtists}&size=${settings.imageSize}&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers}},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras`;
             const imageGenRegexContent = {
                 name: imageGenRegexName,
                 regex: '/image###([\\s\\S]*?)###/g',
