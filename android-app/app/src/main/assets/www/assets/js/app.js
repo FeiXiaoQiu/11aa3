@@ -3366,7 +3366,7 @@ const app = createApp({
         // API & Models
         const getApiEndpoint = (path) => {
             const baseUrl = String(settings.apiUrl || '').replace(/\/+$/, '');
-            const apiUrl = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`;
+            const apiUrl = /\/v\d+(\.\d+)?$/.test(baseUrl) ? baseUrl : `${baseUrl}/v1`;
             return `${apiUrl}/${String(path || '').replace(/^\/+/, '')}`;
         };
 
