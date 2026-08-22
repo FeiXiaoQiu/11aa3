@@ -34,9 +34,9 @@ jobs:
         run: gradle assembleRelease -x lintVitalRelease --no-daemon
 
       - name: Create GitHub release and upload APK
-        uses: softprops/action-gh-release@v2
-        with:
-          name: Roleplay Hub Android ${{ github.ref_name }}
-          files: android-app/app/build/outputs/apk/release/RoleplayHub-*.apk
-          generate_release_notes: false
-          draft: false
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Roleplay Hub Android ${{ github.ref_name }}" \
+            android-app/app/build/outputs/apk/release/RoleplayHub-*.apk
