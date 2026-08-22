@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: release-${{ github.ref_name }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-and-release:
@@ -37,59 +37,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -e
           TAG="${{ github.ref_name }}"
-          API="https://api.github.com/repos/${{ github.repository }}"
-          RELEASE_JSON=$(curl -s -X POST \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Content-Type: application/json" \
-            "$API/releases" \
-            -d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"${{ github.sha }}\",\"name\":\"Roleplay Hub Android $TAG\",\"draft\":true}")
-          echo "$RELEASE_JSON" | jq .
-          RELEASE_ID=$(echo "$RELEASE_JSON" | jq -r .id)
-          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "null" ]; then
-            echo "Failed to create draft release"
-            exit 1
-          fi
-          echo "RELEASE_ID=$RELEASE_ID" >> "$GITHUB_ENV"
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --draft \
+            --title "Roleplay Hub Android $TAG" \
+            --target "${{ github.sha }}"
 
       - name: Build release APK
         working-directory: android-app
         run: gradle assembleRelease -x lintVitalRelease --no-daemon
 
-      - name: Upload APK to release and publish
+      - name: Upload APK and publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -e
-          RELEASE_ID="${{ env.RELEASE_ID }}"
-          API="https://api.github.com/repos/${{ github.repository }}"
-
-          UPLOAD_URL=$(curl -s -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github.v3+json" \
-            "$API/releases/$RELEASE_ID" | jq -r .upload_url | sed 's/{?name,label}//')
-
-          for apk in android-app/app/build/outputs/apk/release/RoleplayHub-*.apk; do
-            NAME=$(basename "$apk")
-            echo "Uploading $NAME"
-            curl -s -X POST \
-              -H "Authorization: token $GH_TOKEN" \
-              -H "Accept: application/vnd.github.v3+json" \
-              -H "Content-Type: application/vnd.android.package-archive" \
-              --data-binary "@$apk" \
-              "$UPLOAD_URL?name=$NAME"
-          done
-
-          echo "Publishing release $RELEASE_ID"
-          PUBLISH_JSON=$(curl -s -X PATCH \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Content-Type: application/json" \
-            "$API/releases/$RELEASE_ID" \
-            -d '{"draft":false}')
-          echo "$PUBLISH_JSON" | jq .
-          PUBLISHED_DRAFT=$(echo "$PUBLISH_JSON" | jq -r .draft)
-          if [ "$PUBLISHED_DRAFT" != "false" ]; then
-            echo "Release is still draft after publish attempt"
-            exit 1
-          fi
+          TAG="${{ github.ref_name }}"
+          gh release upload "$TAG" \
+            --repo "${{ github.repository }}" \
+            --clobber \
+            android-app/app/build/outputs/apk/release/RoleplayHub-*.apk
+          gh release edit "$TAG" \
+            --repo "${{ github.repository }}" \
+            --draft=false
