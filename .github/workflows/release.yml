@@ -43,6 +43,7 @@ jobs:
           RELEASE_JSON=$(curl -s -X POST \
             -H "Authorization: token $GH_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
+            -H "Content-Type: application/json" \
             "$API/releases" \
             -d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"${{ github.sha }}\",\"name\":\"Roleplay Hub Android $TAG\",\"draft\":true}")
           echo "$RELEASE_JSON" | jq .
@@ -80,8 +81,15 @@ jobs:
           done
 
           echo "Publishing release $RELEASE_ID"
-          curl -s -X PATCH \
+          PUBLISH_JSON=$(curl -s -X PATCH \
             -H "Authorization: token $GH_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
+            -H "Content-Type: application/json" \
             "$API/releases/$RELEASE_ID" \
-            -d '{"draft":false}' | jq .
+            -d '{"draft":false}')
+          echo "$PUBLISH_JSON" | jq .
+          PUBLISHED_DRAFT=$(echo "$PUBLISH_JSON" | jq -r .draft)
+          if [ "$PUBLISHED_DRAFT" != "false" ]; then
+            echo "Release is still draft after publish attempt"
+            exit 1
+          fi
