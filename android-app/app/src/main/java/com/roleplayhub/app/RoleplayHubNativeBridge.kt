@@ -50,4 +50,24 @@ class RoleplayHubNativeBridge(private val activity: MainActivity) {
     fun onBackupProgress(done: Int, total: Int, stage: String) {
         activity.onBackupProgress(done, total, stage)
     }
+
+    @JavascriptInterface
+    fun requestIgnoreBatteryOptimizations() {
+        activity.requestIgnoreBatteryOptimizations()
+    }
+
+    @JavascriptInterface
+    fun isIgnoringBatteryOptimizations(): Boolean {
+        return activity.isIgnoringBatteryOptimizations()
+    }
+
+    @JavascriptInterface
+    fun requestWakeLock() {
+        activity.requestWakeLock()
+    }
+
+    @JavascriptInterface
+    fun releaseWakeLock() {
+        activity.releaseWakeLock()
+    }
 }

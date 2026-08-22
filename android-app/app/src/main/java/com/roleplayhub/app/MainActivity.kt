@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.PowerManager
 import android.util.Base64
 import android.view.Gravity
 import android.view.MenuItem
@@ -61,6 +62,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingBackupStripImages: Boolean? = null
     private val plainBackupReceiver = PlainBackupReceiver()
     private var pendingPlainBackupFiles: List<PlainBackupManager.PlainFile>? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     private val imageSavePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val url = pendingImageSaveUrl
@@ -317,6 +319,7 @@ class MainActivity : AppCompatActivity() {
         popup.menu.add(0, 2, 1, R.string.menu_export)
         popup.menu.add(0, 3, 2, "恢复数据备份")
         popup.menu.add(0, 4, 3, "所有文件管理权限")
+        popup.menu.add(0, 5, 4, "电池优化白名单")
         popup.setOnMenuItemClickListener { item: MenuItem ->
             when (item.itemId) {
                 2 -> {
@@ -333,6 +336,10 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         promptAllFilesAccess(null)
                     }
+                    true
+                }
+                5 -> {
+                    requestIgnoreBatteryOptimizations()
                     true
                 }
                 else -> true
@@ -584,6 +591,48 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    fun isIgnoringBatteryOptimizations(): Boolean {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        return powerManager?.isIgnoringBatteryOptimizations(packageName) ?: false
+    }
+
+    fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT < 23) return
+        if (isIgnoringBatteryOptimizations()) {
+            Toast.makeText(this, "已在电池优化白名单中", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "无法打开电池优化设置", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private var wakeLockRefCount = 0
+
+    fun requestWakeLock() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+        if (wakeLock == null) {
+            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RoleplayHub:GenerationWakeLock").apply {
+                setReferenceCounted(false)
+            }
+        }
+        wakeLockRefCount++
+        wakeLock?.takeIf { !it.isHeld }?.acquire(30 * 60 * 1000L)
+    }
+
+    fun releaseWakeLock() {
+        if (wakeLockRefCount > 0) wakeLockRefCount--
+        if (wakeLockRefCount <= 0) {
+            wakeLockRefCount = 0
+            wakeLock?.takeIf { it.isHeld }?.release()
+        }
+    }
 
     override fun onDestroy() {
         webView.destroy()

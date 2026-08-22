@@ -4438,6 +4438,8 @@ const app = createApp({
         const generateResponse = async (startTime = null, options = {}) => {
             const reuseGeneratingState = options.reuseGeneratingState === true;
             if (isGenerating.value && !reuseGeneratingState) return;
+            const native = window.RoleplayHubNative;
+            try {
             const activeToolDepth = Number(options.activeToolDepth) || 0;
             const continueAssistantMessageId = options.continueAssistantMessageId || null;
             const continuationToolCallId = options.continuationToolCallId || null;
@@ -4456,6 +4458,9 @@ const app = createApp({
             }
 
             isGenerating.value = true;
+            if (native && typeof native.requestWakeLock === 'function') {
+                try { native.requestWakeLock(); } catch (e) { /* ignore */ }
+            }
             // 工具续写时内容会回填到旧气泡里，这里先占住“已在接收”的状态，
             // 避免底部全局 typing 占位气泡冒出来。
             isReceiving.value = !!continuationTargetMessage;
@@ -5051,6 +5056,9 @@ const app = createApp({
                     chatHistory.value.push({ role: 'system', name: currentCharacter.value.name, content: error.message });
                 }
             } finally {
+                if (native && typeof native.releaseWakeLock === 'function') {
+                    try { native.releaseWakeLock(); } catch (e) { /* ignore */ }
+                }
                 if (assistantMessage?.content) filterBlockedStyleText(assistantMessage.content, { log: true });
                 if (continuationToolCall && continuationToolCall.status === 'continuing') {
                     continuationToolCall.status = 'done';
@@ -5095,6 +5103,11 @@ const app = createApp({
                     nextTick(() => {
                         extractMemoryFromChat();
                     });
+                }
+            }
+            } finally {
+                if (native && typeof native.releaseWakeLock === 'function') {
+                    try { native.releaseWakeLock(); } catch (e) { /* ignore */ }
                 }
             }
         };
