@@ -2209,15 +2209,30 @@ const app = createApp({
             }
         };
 
-        const handleGeneratedImageSave = (event, messageIndex) => {
+        const handleGeneratedImageSave = async (event, messageIndex) => {
             const button = event.target.closest('.generated-image-save');
             if (!button) return;
             event.preventDefault();
             event.stopPropagation();
             const card = button.closest('.generated-image-card');
             if (!card || card.classList.contains('is-generating')) return;
-            const imageUrl = card.querySelector('img')?.getAttribute('src');
+            let imageUrl = card.querySelector('img')?.getAttribute('src');
             if (!imageUrl) return;
+            if (imageUrl.startsWith('blob:')) {
+                try {
+                    const response = await fetch(imageUrl);
+                    const blob = await response.blob();
+                    imageUrl = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result);
+                        reader.onerror = () => reject(new Error('读取图片失败'));
+                        reader.readAsDataURL(blob);
+                    });
+                } catch (error) {
+                    showToast('读取图片失败：' + (error.message || '未知错误'), 'error');
+                    return;
+                }
+            }
             const native = window.RoleplayHubNative;
             if (!native || typeof native.saveImage !== 'function') {
                 showToast('当前环境不支持保存图片', 'warning');

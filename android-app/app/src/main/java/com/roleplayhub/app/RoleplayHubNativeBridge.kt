@@ -6,7 +6,7 @@ class RoleplayHubNativeBridge(private val activity: MainActivity) {
 
     @JavascriptInterface
     fun saveImage(url: String) {
-        if (url.startsWith("https://") || url.startsWith("http://")) {
+        if (url.startsWith("https://") || url.startsWith("http://") || url.startsWith("data:")) {
             activity.requestSaveImage(url)
         }
     }
